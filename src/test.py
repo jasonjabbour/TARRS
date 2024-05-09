@@ -5,42 +5,50 @@ from viewer import Viewer
 from bmca import BMCA
 from ptp import Clock, NetworkSwitch
 
+clock_num = 2
 
+def create_clocks(clock_num):
+    clocks = []
+    for i in range(clock_num):
+        clock_name = f"Clock{i}"
+        clock_error = random.uniform(0.1, 0.9)
+        clock_drift = random.uniform(0.01, 0.9)
+        clock_priority = random.randint(1, 255)  # Assign a random priority between 1 and 255
+        clocks.append(Clock(env, clock_name, clock_error, clock_drift, network, clock_priority))
+    return clocks
+    
 def run_simulation():
+    global env 
+
     try:
         env.run(until=env.now + 1)  # Run simulation for one more step
     except StopIteration:
         return  # If the simulation is done, stop calling this function
-    root.after(100, run_simulation)  # Schedule the next call
+    root.after(1, run_simulation)  # Schedule the next call
 
-# Setup the GUI and Simulation Environment
-root = tk.Tk()
+# Setup the Simulation Environment
 env = simpy.Environment()
 network = NetworkSwitch(env, 'Switch1', None)
 
-clock_num = 2
-clocks = []
-clock_drift_lst = [0,.345, .566, .567]
+# Create clocks
+clocks = create_clocks(clock_num)
 
-for i in range(clock_num):
-    clock_name = f'Clock{i}'
-    clock_accuracy = random.uniform(0.1, 0.9)
-    clock_drift = clock_drift_lst[i]
-    clocks.append(Clock(env, clock_name, clock_accuracy, clock_drift, network))
-
+# Initialize the GUI
+root = tk.Tk()
 gui = Viewer(root, clocks, network)
-network.gui = gui  # Now the GUI is correctly linked to the network switch
+# Link GUI to the network switch
+network.gui = gui  
 
-# Connect clocks and elect leader
-for clock in clocks:
-    network.connect(clock)
+# Connect Clocks
+network.connect_all(clocks)
 
+# Start clocks
+network.start_clocks(clocks)
+
+# Elect Leader
 leader_finder = BMCA(clocks, env)
 leader_clock = leader_finder.bmca()
 
-# Start clock processes
-for clock in clocks:
-    env.process(clock.run())
-
-root.after(100, run_simulation)  # Start the simulation
+# Start the simulation
+root.after(1, run_simulation)  
 root.mainloop()

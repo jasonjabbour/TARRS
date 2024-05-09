@@ -6,14 +6,15 @@ from packet import Packet
 
 
 class Clock:
-    def __init__(self, env, name, accuracy, drift, network):
+    def __init__(self, env, name, error, drift, network, priority):
         self.env = env
         self.name = name
-        self.accuracy = accuracy
+        self.error = error
         self.drift = drift
         self.time = 0
         self.leader = False
         self.offset = 0
+        self.priority = priority
         self.network = network
         self.follow_up_pending = None
         self.delay_req_pending = None
@@ -78,17 +79,22 @@ class Clock:
         self.path_delay = round_trip_delay / 2
 
         # Calculate total adjustment
-        self.time_adjustment = self.offset + self.path_delay
+        self.time_adjustment = self.offset + (self.path_delay / 2)
 
         # Apply adjustment and log the times
         self.apply_time_adjustment()
 
     def apply_time_adjustment(self):
-        old_time = self.time
-        self.time -= self.time_adjustment
-        leader_time = self.network.find_leader().time if self.network.find_leader() else "No leader"
-        print(f'Clock {self.name} synchronized. New Time: {self.time}, Leader Time: {leader_time}, Time Adjusted by: {self.time_adjustment}')
-        print(f'{self.name} clock was at {old_time}, adjusted to {self.time}. Leader is at {leader_time}. Env time: {self.env.now}')
+        if not self.leader:  # Only apply adjustment for non-leader clocks
+            old_time = self.time
+            self.time -= self.time_adjustment
+            leader_time = self.network.find_leader().time
+            print(f'Clock {self.name} synchronized. New Time: {self.time}, Leader Time: {leader_time}, Time Adjusted by: {self.time_adjustment}')
+            print(f'{self.name} clock was at {old_time}, adjusted to {self.time}. Leader is at {leader_time}. Env time: {self.env.now}')
+        else:
+            leader_time = self.time
+            print(f'Leader {self.name} time is: {leader_time}. Env time: {self.env.now}')
+
 
 
 class NetworkSwitch:
@@ -97,14 +103,22 @@ class NetworkSwitch:
         self.name = name
         self.connections = []
         self.gui = gui
+        self.network_delay = 1
 
-    
     def find_leader(self):
         # Return the leader clock
         for device in self.connections:
             if device.leader:
                 return device
         return None
+    
+    def start_clocks(self, clocks):
+        for clock in clocks:
+            self.env.process(clock.run())
+    
+    def connect_all(self, clocks):
+        for clock in clocks:
+            self.connect(clock)
 
     def connect(self, device):
         self.connections.append(device)
@@ -113,13 +127,13 @@ class NetworkSwitch:
         self.env.process(self.handle_packet(packet, origin))  # Start a new process for handling the packet
 
     def handle_packet(self, packet, origin):
-        delay = 1 
-        yield self.env.timeout(delay)  # Wait for the delay
+        # TODO: Send network delay to visualization
+        if self.gui:
+            self.gui.animate_packet(origin, packet.receiver, packet.content['type'])
+        yield self.env.timeout(self.network_delay)  # Wait for the delay
         for device in self.connections:
             if device != origin:
                 device.receive_packet(packet)
-                if self.gui:
-                    self.gui.animate_packet(origin, packet.receiver, packet.content['type'])
                 print(f'{self.env.now}: {self.name} forwarded {packet.content["type"]} packet from {packet.sender.name} to {device.name}.')
 
 
