@@ -129,7 +129,7 @@ class NetworkSwitch:
     def handle_packet(self, packet, origin):
         # TODO: Send network delay to visualization
         if self.gui:
-            self.gui.animate_packet(origin, packet.receiver, packet.content['type'])
+            self.gui.animate_packet(origin, packet.content['type'], self.network_delay)
         yield self.env.timeout(self.network_delay)  # Wait for the delay
         for device in self.connections:
             if device != origin:
