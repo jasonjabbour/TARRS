@@ -3,3 +3,6 @@
 # Requirements
 - python 3.10
 - simpy
+- networkx
+- matplotlib
+- gym
