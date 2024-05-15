@@ -9,6 +9,9 @@ import time
 
 from network_env import NetworkEnvironment
 
+
+SHOW_WEIGHT_LABELS = False 
+
 class SpanningTreeEnv(gym.Env):
     def __init__(self, min_nodes, max_nodes, min_redundancy, max_redundancy, show_weight_labels=False):
         super(SpanningTreeEnv, self).__init__()
@@ -34,13 +37,16 @@ class SpanningTreeEnv(gym.Env):
 
         # Initialize placeholder for node positions
         self.pos = None
-        
+
+        # Set of nodes that are attacked
+        self.attacked_nodes = set()  
+
         # Set up the Tkinter root window
         self.root = tk.Tk()
         self.root.wm_title("Spanning Tree Environment")
         
         # Set up Matplotlib figure and axes
-        self.fig, self.ax = plt.subplots(1, 2, figsize=(14, 6))
+        self.fig, self.ax = plt.subplots(1, 3, figsize=(14, 6))
         
         # Embed the Matplotlib figure in the Tkinter canvas
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.root)
@@ -66,6 +72,9 @@ class SpanningTreeEnv(gym.Env):
         
         # Get the number of nodes in the current network
         self.num_nodes = self.network_env.num_nodes
+
+        # Simulate attack
+        self.simulate_attack()
         
         # Define the action space as pairs of nodes (parent, child)
         self.action_space = spaces.MultiDiscrete([self.num_nodes, self.num_nodes])
@@ -108,6 +117,7 @@ class SpanningTreeEnv(gym.Env):
         # Clear the previous plots
         self.ax[0].clear()
         self.ax[1].clear()
+        self.ax[2].clear()
         
         # Draw the original physical network
         nx.draw(self.network, self.pos, with_labels=True, node_color='skyblue', node_size=700, edge_color='gray', ax=self.ax[0])
@@ -116,6 +126,11 @@ class SpanningTreeEnv(gym.Env):
         # Draw the current spanning tree
         nx.draw(self.tree, self.pos, with_labels=True, node_color='lightgreen', node_size=700, edge_color='gray', ax=self.ax[1]) 
         self.ax[1].set_title("Spanning Tree")
+
+        # Attacked Spanning Tree
+        node_colors = ['red' if node in self.attacked_nodes else 'lightgreen' for node in self.tree.nodes()]
+        nx.draw(self.tree, self.pos, with_labels=True, node_color=node_colors, node_size=700, edge_color='gray', ax=self.ax[2])
+        self.ax[2].set_title("Attacked Spanning Tree")
 
         # Check if weight labels should be shown
         if self.show_weight_labels:
@@ -135,10 +150,15 @@ class SpanningTreeEnv(gym.Env):
         self.root.quit()
         self.root.destroy()
 
+    # TODO: Move to separate class
+    def simulate_attack(self, num_attacks=2):
+        # Randomly select a few nodes to attack
+        self.attacked_nodes = set(np.random.choice(self.network.nodes(), num_attacks, replace=False))
+        
 # Example usage
 if __name__ == "__main__":
     # Create the SpanningTreeEnv environment
-    env = SpanningTreeEnv(min_nodes=5, max_nodes=15, min_redundancy=2, max_redundancy=4, show_weight_labels=True)
+    env = SpanningTreeEnv(min_nodes=5, max_nodes=15, min_redundancy=2, max_redundancy=4, show_weight_labels=SHOW_WEIGHT_LABELS)
     
     # Reset the environment to start a new episode
     state = env.reset()
