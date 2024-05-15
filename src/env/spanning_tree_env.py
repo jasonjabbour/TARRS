@@ -10,7 +10,7 @@ import time
 from network_env import NetworkEnvironment
 
 class SpanningTreeEnv(gym.Env):
-    def __init__(self, min_nodes, max_nodes, min_redundancy, max_redundancy):
+    def __init__(self, min_nodes, max_nodes, min_redundancy, max_redundancy, show_weight_labels=False):
         super(SpanningTreeEnv, self).__init__()
         
         # Initialize parameters for the network environment
@@ -18,7 +18,10 @@ class SpanningTreeEnv(gym.Env):
         self.max_nodes = max_nodes
         self.min_redundancy = min_redundancy
         self.max_redundancy = max_redundancy
-        
+
+        # Parameter to control weight label rendering
+        self.show_weight_labels = show_weight_labels 
+
         # Initialize placeholders for the network environment and graphs
         self.network_env = None
         self.network = None
@@ -113,7 +116,17 @@ class SpanningTreeEnv(gym.Env):
         # Draw the current spanning tree
         nx.draw(self.tree, self.pos, with_labels=True, node_color='lightgreen', node_size=700, edge_color='gray', ax=self.ax[1]) 
         self.ax[1].set_title("Spanning Tree")
-        
+
+        # Check if weight labels should be shown
+        if self.show_weight_labels:
+            # Label for original physical network
+            edge_labels = nx.get_edge_attributes(self.network, 'weight')
+            nx.draw_networkx_edge_labels(self.network, self.pos, edge_labels=edge_labels, ax=self.ax[0])
+
+            # Label for current spanning tree
+            edge_labels = nx.get_edge_attributes(self.tree, 'weight')
+            nx.draw_networkx_edge_labels(self.tree, self.pos, edge_labels=edge_labels, ax=self.ax[1])
+
         # Update the canvas to reflect the new plots
         self.canvas.draw()
 
@@ -125,7 +138,7 @@ class SpanningTreeEnv(gym.Env):
 # Example usage
 if __name__ == "__main__":
     # Create the SpanningTreeEnv environment
-    env = SpanningTreeEnv(min_nodes=5, max_nodes=15, min_redundancy=2, max_redundancy=4)
+    env = SpanningTreeEnv(min_nodes=5, max_nodes=15, min_redundancy=2, max_redundancy=4, show_weight_labels=True)
     
     # Reset the environment to start a new episode
     state = env.reset()
