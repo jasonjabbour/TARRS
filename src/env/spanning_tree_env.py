@@ -9,7 +9,6 @@ import time
 
 from network_env import NetworkEnvironment
 
-
 SHOW_WEIGHT_LABELS = False 
 
 class SpanningTreeEnv(gym.Env):
@@ -76,12 +75,18 @@ class SpanningTreeEnv(gym.Env):
         # Simulate attack
         self.simulate_attack()
         
-        # Define the action space as pairs of nodes (parent, child)
-        self.action_space = spaces.MultiDiscrete([self.num_nodes, self.num_nodes])
+        # Define the action space as pairs of nodes (action_type ,parent, child)
+        self.action_space = spaces.MultiDiscrete([2, self.num_nodes, self.num_nodes])
         
-        # Define the observation space as the adjacency matrix of the network
-        self.observation_space = spaces.Box(0, 1, shape=(self.num_nodes, self.num_nodes), dtype=int)
-        
+        # Define the observation space 
+        # TODO: Explore embedding matrices into a different dimension
+        self.observation_space = spaces.Dict({
+            "full_network": spaces.Box(low=0, high=1, shape=(self.num_nodes, self.num_nodes), dtype=np.int32),
+            "mst": spaces.Box(low=0, high=1, shape=(self.num_nodes, self.num_nodes), dtype=np.int32),
+            "weights": spaces.Box(low=0, high=1, shape=(self.num_nodes, self.num_nodes), dtype=np.int32),
+            "attacked": spaces.Box(low=0, high=1, shape=(self.num_nodes,), dtype=np.int32)
+        })
+
         # Return the initial state
         return self.get_state()
     
@@ -89,29 +94,82 @@ class SpanningTreeEnv(gym.Env):
         # Convert the MST to an adjacency matrix for the state representation
         adj_matrix = nx.to_numpy_array(self.tree, dtype=int)
         return adj_matrix
+
+    def get_state(self):
+        # Convert the full network and MST to adjacency matrices
+        full_net_matrix = nx.to_numpy_array(self.network, dtype=int)
+        mst_matrix = nx.to_numpy_array(self.tree, dtype=int)
+        # Extract edge weights from the full network
+        weights_matrix = nx.to_numpy_array(self.network, weight='weight')
+        # Create a binary array indicating attacked nodes
+        attacked_vector = np.array([1 if node in self.attacked_nodes else 0 for node in range(self.num_nodes)])
+
+        # Complete State
+        return {
+            "full_network": full_net_matrix,
+            "mst": mst_matrix,
+            "weights": weights_matrix,
+            "attacked": attacked_vector
+        }
     
     def step(self, action):
-        # Extract the parent and child nodes from the action
-        parent, child = action
+        # Unpack the action tuple
+        action_type, parent, child = action  
 
-        # Initialize the reward and done flag
-        reward = -10
+        # Default penalty for invalid actions
+        reward = -1 
         done = False
 
-        # Check if the action is valid (parent is in the tree, child is not, and there is an edge in the network)
-        if parent in self.tree and child not in self.tree and self.network.has_edge(parent, child):
-            # Add the edge to the spanning tree
-            self.tree.add_edge(parent, child)
-            
-            # Update the reward for a valid action
-            reward = 1
-            
-            # Check if the spanning tree includes all nodes
-            if len(self.tree) == self.num_nodes:
-                done = True  # Episode ends when all nodes are added
-        
-        # Return the new state, reward, and done flag
+        # Attempt to add a connection
+        if action_type == 0:  
+            if parent in self.tree.nodes and child in self.tree.nodes and not self.tree.has_edge(parent, child) and self.network.has_edge(parent, child):
+                self.tree.add_edge(parent, child, weight=self.network[parent][child]['weight'])
+                # Reward for a valid action
+                reward = .1 
+
+         # Attempt to remove a connection
+        elif action_type == 1: 
+            if self.tree.has_edge(parent, child):
+                self.tree.remove_edge(parent, child)
+                # Reward for a valid action
+                reward = .1  
+
+        # Check if attacked nodes are isolated
+        if all(not self.tree.has_edge(node, other) for node in self.attacked_nodes for other in self.tree.nodes if other != node):
+
+            # Reward for isolating attacked nodes
+            reward += .1
+
+            # All attacked nodes are isolated, now check the remaining graph
+            non_attacked_subgraph = self.tree.subgraph([n for n in self.tree.nodes if n not in self.attacked_nodes])
+
+            # Check if subgraph is connected
+            if nx.is_connected(non_attacked_subgraph):
+
+                # Calculate the current total weight of the tree
+                current_weight = sum(data['weight'] for u, v, data in non_attacked_subgraph.edges(data=True))
+                # Encourage lighter trees
+                # TODO. Normalize this since larger networks will have more cost
+                reward += 10 - current_weight
+
+                # Check if subgraph is a valid tree  
+                if nx.is_tree(non_attacked_subgraph):
+                    # Bonus for a valid spanning tree
+                    reward += .2  
+                    # End the episode if the tree is valid and connected
+                    done = True  
+                else:
+                    # Penalize if not a valid tree
+                    reward -= .2  
+            else:
+                # Penalize disconnection among non-attacked nodes
+                reward -= .2  
+        else:
+            # Penalty for not isolating attacked nodes
+            reward -= .1
+
         return self.get_state(), reward, done, {}
+
 
     def render(self, mode='human'):
         # Clear the previous plots
@@ -150,8 +208,10 @@ class SpanningTreeEnv(gym.Env):
         self.root.quit()
         self.root.destroy()
 
-    # TODO: Move to separate class
     def simulate_attack(self, num_attacks=2):
+        # TODO: Move to separate class
+        # TODO: Vary the number of attacked nodes
+        # TODO: Intelligent choice of nodes to attack
         # Randomly select a few nodes to attack
         self.attacked_nodes = set(np.random.choice(self.network.nodes(), num_attacks, replace=False))
         
@@ -168,7 +228,7 @@ if __name__ == "__main__":
     while not done:
         # Select a random action from the action space
         action = env.action_space.sample()
-        print(action)
+
         # Execute the action and get the new state, reward, and done flag
         state, reward, done, _ = env.step(action)
         
