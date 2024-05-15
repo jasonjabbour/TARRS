@@ -50,16 +50,16 @@ class SpanningTreeEnv(gym.Env):
         
         # Reset the network environment and get the initial network
         self.network = self.network_env.reset()
-        
+
+         # Retrieve positions after reset
+        self.pos = self.network_env.get_positions(self.network) 
+
         # Clear the previous spanning tree if it exists
         if self.tree is not None:
             self.tree.clear()
         
-        # Initialize a new directed graph for the spanning tree
-        self.tree = nx.DiGraph()
-        
-        # Add the root node (node 0) to the spanning tree
-        self.tree.add_node(0)
+        # Compute the Minimum Spanning Tree of the network using the weights
+        self.tree = nx.minimum_spanning_tree(self.network, weight='weight')  
         
         # Get the number of nodes in the current network
         self.num_nodes = self.network_env.num_nodes
@@ -74,8 +74,8 @@ class SpanningTreeEnv(gym.Env):
         return self.get_state()
     
     def get_state(self):
-        # Convert the network graph to an adjacency matrix and return it as the state
-        adj_matrix = nx.to_numpy_array(self.network, dtype=int)
+        # Convert the MST to an adjacency matrix for the state representation
+        adj_matrix = nx.to_numpy_array(self.tree, dtype=int)
         return adj_matrix
     
     def step(self, action):
@@ -106,9 +106,6 @@ class SpanningTreeEnv(gym.Env):
         self.ax[0].clear()
         self.ax[1].clear()
         
-        # Compute the layout for the network graph
-        self.pos = nx.spring_layout(self.network, seed=42)
-
         # Draw the original physical network
         nx.draw(self.network, self.pos, with_labels=True, node_color='skyblue', node_size=700, edge_color='gray', ax=self.ax[0])
         self.ax[0].set_title("Original Physical Network")
