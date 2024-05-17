@@ -30,9 +30,19 @@ class SpanningTreeEnv(gym.Env):
         self.tree = None
         
         # Initialize placeholders for the number of nodes, action space, and observation space
-        self.num_nodes = None
-        self.action_space = None
-        self.observation_space = None
+        self.num_nodes = max_nodes 
+
+        # Define the action space as pairs of nodes (action_type ,parent, child)
+        self.action_space = spaces.MultiDiscrete([2, self.num_nodes, self.num_nodes])
+
+        # Define the observation space 
+        # TODO currently observation space is max number of nodes. Explore embedding to an equal dimension.
+        self.observation_space = spaces.Dict({
+            "full_network": spaces.Box(low=0, high=1, shape=(self.num_nodes, self.num_nodes), dtype=np.int32),
+            "mst": spaces.Box(low=0, high=1, shape=(self.num_nodes, self.num_nodes), dtype=np.int32),
+            "weights": spaces.Box(low=0, high=1, shape=(self.num_nodes, self.num_nodes), dtype=np.int32),
+            "attacked": spaces.Box(low=0, high=1, shape=(self.num_nodes,), dtype=np.int32)
+        })
 
         # Initialize placeholder for node positions
         self.pos = None
@@ -74,41 +84,43 @@ class SpanningTreeEnv(gym.Env):
 
         # Simulate attack
         self.simulate_attack()
-        
-        # Define the action space as pairs of nodes (action_type ,parent, child)
-        self.action_space = spaces.MultiDiscrete([2, self.num_nodes, self.num_nodes])
-        
-        # Define the observation space 
-        # TODO: Explore embedding matrices into a different dimension
-        self.observation_space = spaces.Dict({
-            "full_network": spaces.Box(low=0, high=1, shape=(self.num_nodes, self.num_nodes), dtype=np.int32),
-            "mst": spaces.Box(low=0, high=1, shape=(self.num_nodes, self.num_nodes), dtype=np.int32),
-            "weights": spaces.Box(low=0, high=1, shape=(self.num_nodes, self.num_nodes), dtype=np.int32),
-            "attacked": spaces.Box(low=0, high=1, shape=(self.num_nodes,), dtype=np.int32)
-        })
 
         # Return the initial state
         return self.get_state()
-    
-    def get_state(self):
-        # Convert the MST to an adjacency matrix for the state representation
-        adj_matrix = nx.to_numpy_array(self.tree, dtype=int)
-        return adj_matrix
 
     def get_state(self):
+
+        # Function to pad matrices to the maximum node size
+        size = self.max_nodes
+
         # Convert the full network and MST to adjacency matrices
         full_net_matrix = nx.to_numpy_array(self.network, dtype=int)
         mst_matrix = nx.to_numpy_array(self.tree, dtype=int)
-        # Extract edge weights from the full network
-        weights_matrix = nx.to_numpy_array(self.network, weight='weight')
-        # Create a binary array indicating attacked nodes
-        attacked_vector = np.array([1 if node in self.attacked_nodes else 0 for node in range(self.num_nodes)])
 
-        # Complete State
+        # Pad the full network matrix
+        full_net_matrix_padded = np.zeros((size, size), dtype=int)
+        full_net_matrix_padded[:full_net_matrix.shape[0], :full_net_matrix.shape[1]] = full_net_matrix
+
+        # Pad the MST matrix
+        mst_matrix_padded = np.zeros((size, size), dtype=int)
+        mst_matrix_padded[:mst_matrix.shape[0], :mst_matrix.shape[1]] = mst_matrix
+
+        # Extract edge weights from the full network and pad it
+        weights_matrix = nx.to_numpy_array(self.network, weight='weight')
+        weights_matrix_padded = np.zeros((size, size), dtype=int)
+        weights_matrix_padded[:weights_matrix.shape[0], :weights_matrix.shape[1]] = weights_matrix
+
+        # Create and pad the binary array indicating attacked nodes
+        attacked_vector = np.zeros(size, dtype=int)
+        for node in self.attacked_nodes:
+            if node < size:
+                attacked_vector[node] = 1
+
+        # Complete State: Ensure all parts are padded to the maximum size
         return {
-            "full_network": full_net_matrix,
-            "mst": mst_matrix,
-            "weights": weights_matrix,
+            "full_network": full_net_matrix_padded,
+            "mst": mst_matrix_padded,
+            "weights": weights_matrix_padded,
             "attacked": attacked_vector
         }
     
@@ -234,7 +246,7 @@ if __name__ == "__main__":
         
         # Render the current state of the environment
         env.render()
-        
+
         # Update the Tkinter window
         env.root.update()
     

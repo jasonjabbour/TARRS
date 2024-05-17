@@ -2,7 +2,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
 
-LABEL_EDGES = False
+LABEL_EDGES = True
 
 class NetworkEnvironment:
     def __init__(self, min_nodes, max_nodes, min_redundancy, max_redundancy):
