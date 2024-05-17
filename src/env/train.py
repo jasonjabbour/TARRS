@@ -20,71 +20,57 @@ def create_tf_env(environment):
 
 class CustomCategoricalProjectionNetwork(network.Network):
     '''
-        Handles different ranges od discrete actions for each dimension by
-        using separate CategoricalProjectNetwork instances for each action
-        dimension. Outputs from these networks are concatenated to match
-        the expected action space of the agent. 
+    Handles different ranges of discrete actions for each dimension by
+    using separate CategoricalProjectionNetwork instances for each action
+    dimension. Outputs from these networks are concatenated to match
+    the expected action space of the agent.
     '''
     def __init__(self, action_spec, name='CustomCategoricalProjectionNetwork'):
-        '''
-            The network first calculates the number of actions for each
-            dimension using the minimum and maximum values from the 
-            action_spec. It then creates a separate CategoricalProjectionNetwork 
-            for each dimension based on these numbers.
-        '''
         super(CustomCategoricalProjectionNetwork, self).__init__(
             input_tensor_spec=tf.TensorSpec(shape=[None], dtype=tf.float32),
             state_spec=(), name=name)
 
-        # Calculate the number of actions for each dimension
-        self._num_actions_per_dim = action_spec.maximum - action_spec.minimum + 1
+        # Assume action_spec is an instance of MultiDiscrete space from Gym, manually defined
+        # For a MultiDiscrete space defined as [2, num_nodes, num_nodes], we manually set up:
+        num_dimensions = [2, action_spec.maximum[1] + 1, action_spec.maximum[2] + 1]
 
-        # Create a CategoricalProjectionNetwork for each action dimension
         self._projection_networks = [
             categorical_projection_network.CategoricalProjectionNetwork(
                 sample_spec=BoundedTensorSpec(
-                    shape=(), 
-                    dtype=tf.int32, 
-                    minimum=0, 
-                    maximum=num_actions-1
+                    shape=(),
+                    dtype=tf.int32,
+                    minimum=0,
+                    maximum=num_actions - 1
                 )
-            ) for num_actions in self._num_actions_per_dim
+            ) for num_actions in num_dimensions
         ]
-        
+
     def call(self, inputs, step_type=None, network_state=(), training=False):
-        '''
-            During the forward pass (call method), it processes inputs 
-            through each projection network and concatenates their 
-            outputs. Each projection network handles one dimension of 
-            the action space, ensuring that actions are sampled correctly 
-            according to their respective ranges.
-        '''
-        outputs = [proj_net(inputs)[0] for proj_net in self._projection_networks]
+        # Flatten inputs if they come batched
+        inputs = tf.cast(inputs, dtype=tf.float32)
+        outputs = [proj_net(inputs[:, i:i+1])[0] for i, proj_net in enumerate(self._projection_networks)]
         concatenated_outputs = tf.concat(outputs, axis=-1)
         return concatenated_outputs, network_state
 
-# This function creates a PPO Agent
 def create_agent(train_env):
-
-    # Define preprocessing combiner to combine different parts of observation.
+    '''
+    This function creates a PPO Agent with a custom action projection network.
+    The actor and value networks are configured with specific layer parameters
+    and a custom preprocessing combiner that handles the agent's observations.
+    '''
     preprocessing_combiner = tf.keras.layers.Concatenate(axis=-1)
 
-    # Initialize the ActorDistributionNetwork with the environment specs and the custom projection network.
-    actor_net = actor_distribution_network.ActorDistributionNetwork(
-        train_env.observation_spec(),
-        train_env.action_spec(),
-        fc_layer_params=(100, 50),  # Specify the sizes of the fully connected layers.
-        projection_network=CustomCategoricalProjectionNetwork(train_env.action_spec())  # Use the custom projection network.
-    )
+    # Custom network for action projection
+    custom_proj_net = CustomCategoricalProjectionNetwork(train_env.action_spec())
 
     # Actor network, which outputs actions given environmental observations
     actor_net = actor_distribution_network.ActorDistributionNetwork(
-        train_env.observation_spec(),  # Describes the structure of the observation space from the environment
-        train_env.action_spec(),       # Describes the structure of the action space
+        train_env.observation_spec(),
+        train_env.action_spec(),
         preprocessing_combiner=preprocessing_combiner,
-        fc_layer_params=(100, 50),      # The number and size of hidden layers in the neural network
-        projection_network=CustomCategoricalProjectionNetwork(train_env.action_spec())  # Use the custom projection network.
-        )     
+        fc_layer_params=(100, 50),  # Specify the sizes of the fully connected layers.
+        discrete_projection_net=custom_proj_net,
+    )
 
     # Value network, which estimates the value (expected total future reward) of each observation
     value_net = value_network.ValueNetwork(
@@ -93,7 +79,7 @@ def create_agent(train_env):
         fc_layer_params=(100, 50))
 
     # Optimizer to use for training the agent, Adam is a common choice
-    optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=1e-3)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
 
     # Counter to keep track of training steps
     train_step_counter = tf.Variable(0)
