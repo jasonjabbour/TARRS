@@ -1,5 +1,6 @@
 import os
-import gym
+import gymnasium as gym
+import torch 
 import time
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
@@ -11,13 +12,15 @@ MIN_NODES = 50
 MAX_NODES = 50
 MIN_REDUNDANCY = 3
 MAX_REDUNDANCY = 5
-TRAINING_MODE = False  
-MODEL_PATH = "./checkpoints/ppo_spanning_tree_10000000_steps"
-TOTAL_TIMESTEPS = 10000000
+TRAINING_MODE = True  
+MODEL_PATH = "./checkpoints/model1/ppo_spanning_tree_10000000_steps"
+TOTAL_TIMESTEPS = 30000000
 
 def train(env, total_timesteps=10000000):
     """Train the model."""
-    model = PPO("MultiInputPolicy", env, verbose=1, tensorboard_log="./tensorboard_logs/")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Training on device: {device}")
+    model = PPO("MultiInputPolicy", env, verbose=1, tensorboard_log="./tensorboard_logs/", device=device)
     checkpoint_callback = CheckpointCallback(save_freq=100000, save_path='./checkpoints/', name_prefix='ppo_spanning_tree')
     model.learn(total_timesteps=total_timesteps, callback=checkpoint_callback)
     model.save("./ppo_spanning_tree_final")
@@ -25,8 +28,11 @@ def train(env, total_timesteps=10000000):
 
 def test(env, model_path):
     """Test the model with visualization."""
-    model = PPO.load(model_path, env=env)
-    obs = env.reset()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Testing on device: {device}")
+    model = PPO.load(model_path, env=env, device=device)
+    obs, _ = env.reset()
+    print(obs)
     while True:
         action, _states = model.predict(obs, deterministic=False)
         obs, rewards, done, info = env.step(action)
@@ -35,11 +41,12 @@ def test(env, model_path):
             break  # Exit the loop when the episode is done
 
 def main():
-    n_envs=1
+    print("CUDA available:", torch.cuda.is_available())  # Log if CUDA is available
+    n_envs = 1
     render_mode = True
     if TRAINING_MODE:
         n_envs = 10
-        render_mode=False
+        render_mode = False
 
     env = make_vec_env(lambda: SpanningTreeEnv(min_nodes=MIN_NODES, 
                                                max_nodes=MAX_NODES, 

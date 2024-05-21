@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y \
 RUN python3 -m pip install --upgrade pip
 
 # Install required Python modules
-RUN pip install matplotlib gym networkx simpy 
+RUN pip install matplotlib stable-baselines3 gymnasium networkx simpy 
 
 # Install TensorFlow, ensure you get a version that matches your Python setup
 RUN pip install tensorflow==2.15.0 tensorflow-probability==0.19.0

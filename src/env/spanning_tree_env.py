@@ -1,5 +1,5 @@
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 import networkx as nx
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -79,7 +79,12 @@ class SpanningTreeEnv(gym.Env):
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
 
-    def reset(self):  
+    def reset(self, seed=None):
+
+        # Set the random seed
+        if seed is not None:
+            np.random.seed(seed)
+
         # Reset timestep
         self.current_step = 0 
 
@@ -106,7 +111,7 @@ class SpanningTreeEnv(gym.Env):
         self.simulate_attack()
 
         # Return the initial state
-        return self.get_state()
+        return self.get_state(), {}
 
     def get_state(self):
 
@@ -152,6 +157,7 @@ class SpanningTreeEnv(gym.Env):
         # Default penalty for invalid actions
         reward = -1 
         done = False
+        truncated = False
 
         # Attempt to add a connection
         if action_type == 0:  
@@ -212,6 +218,7 @@ class SpanningTreeEnv(gym.Env):
 
         if self.current_step >= self.max_ep_steps:
             done = True  # End the episode because the max step count has been reached
+            truncated = True
 
         # Increment timestep
         self.current_step += 1
@@ -221,7 +228,7 @@ class SpanningTreeEnv(gym.Env):
             self.render()
             self.root.update()
 
-        return self.get_state(), reward, done, {}
+        return self.get_state(), reward, done, truncated, {}
 
 
     def render(self, mode='human'):
@@ -290,6 +297,7 @@ if __name__ == "__main__":
 
         # Execute the action and get the new state, reward, and done flag
         state, reward, done, _ = env.step(action)
+        print(action)
         
         # Update the Tkinter window
         env.root.update()
