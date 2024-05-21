@@ -12,7 +12,7 @@ from network_env import NetworkEnvironment
 SHOW_WEIGHT_LABELS = False 
 
 class SpanningTreeEnv(gym.Env):
-    def __init__(self, min_nodes, max_nodes, min_redundancy, max_redundancy, show_weight_labels=False):
+    def __init__(self, min_nodes, max_nodes, min_redundancy, max_redundancy, show_weight_labels=False, render_mode=False, max_ep_steps=100):
         super(SpanningTreeEnv, self).__init__()
         
         # Initialize parameters for the network environment
@@ -23,6 +23,13 @@ class SpanningTreeEnv(gym.Env):
 
         # Parameter to control weight label rendering
         self.show_weight_labels = show_weight_labels 
+
+        # Permit Rendering
+        self.render_mode = render_mode
+
+        # Max Episode Steps
+        self.max_ep_steps = max_ep_steps
+        self.current_step = 0
 
         # Initialize placeholders for the network environment and graphs
         self.network_env = None
@@ -62,7 +69,10 @@ class SpanningTreeEnv(gym.Env):
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
 
-    def reset(self):        
+    def reset(self):  
+        # Reset timestep
+        self.current_step = 0 
+
         # Create a new network environment for each episode
         self.network_env = NetworkEnvironment(self.min_nodes, self.max_nodes, self.min_redundancy, self.max_redundancy)
         
@@ -125,6 +135,7 @@ class SpanningTreeEnv(gym.Env):
         }
     
     def step(self, action):
+
         # Unpack the action tuple
         action_type, parent, child = action  
 
@@ -145,12 +156,21 @@ class SpanningTreeEnv(gym.Env):
                 self.tree.remove_edge(parent, child)
                 # Reward for a valid action
                 reward = .1  
+                # Additional reward for removing a connection from an attacked node
+                if parent in self.attacked_nodes or child in self.attacked_nodes:
+                    reward += 1  
+
+        # Check each attacked node if it is isolated
+        for node in self.attacked_nodes:
+            if all(not self.tree.has_edge(node, other) for other in self.tree.nodes if other != node):
+                # Reward for completely isolating an attacked node
+                reward += 1
 
         # Check if attacked nodes are isolated
         if all(not self.tree.has_edge(node, other) for node in self.attacked_nodes for other in self.tree.nodes if other != node):
 
             # Reward for isolating attacked nodes
-            reward += .1
+            reward += 1
 
             # All attacked nodes are isolated, now check the remaining graph
             non_attacked_subgraph = self.tree.subgraph([n for n in self.tree.nodes if n not in self.attacked_nodes])
@@ -167,7 +187,7 @@ class SpanningTreeEnv(gym.Env):
                 # Check if subgraph is a valid tree  
                 if nx.is_tree(non_attacked_subgraph):
                     # Bonus for a valid spanning tree
-                    reward += .2  
+                    reward += 10  
                     # End the episode if the tree is valid and connected
                     done = True  
                 else:
@@ -179,6 +199,16 @@ class SpanningTreeEnv(gym.Env):
         else:
             # Penalty for not isolating attacked nodes
             reward -= .1
+
+        if self.current_step >= self.max_ep_steps:
+            done = True  # End the episode because the max step count has been reached
+
+        # Increment timestep
+        self.current_step += 1
+
+        # Render the current state of the environment
+        if self.render_mode:
+            self.render()
 
         return self.get_state(), reward, done, {}
 
@@ -230,7 +260,12 @@ class SpanningTreeEnv(gym.Env):
 # Example usage
 if __name__ == "__main__":
     # Create the SpanningTreeEnv environment
-    env = SpanningTreeEnv(min_nodes=5, max_nodes=15, min_redundancy=2, max_redundancy=4, show_weight_labels=SHOW_WEIGHT_LABELS)
+    env = SpanningTreeEnv(min_nodes=5, 
+                          max_nodes=15, 
+                          min_redundancy=2, 
+                          max_redundancy=4, 
+                          show_weight_labels=SHOW_WEIGHT_LABELS, 
+                          render_mode=True)
     
     # Reset the environment to start a new episode
     state = env.reset()
@@ -244,9 +279,6 @@ if __name__ == "__main__":
         # Execute the action and get the new state, reward, and done flag
         state, reward, done, _ = env.step(action)
         
-        # Render the current state of the environment
-        env.render()
-
         # Update the Tkinter window
         env.root.update()
     
