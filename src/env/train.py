@@ -1,58 +1,98 @@
 import os
 import gym
+import time
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
+from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.evaluation import evaluate_policy
 from spanning_tree_env import SpanningTreeEnv
 
-MIN_NODES = 5
-MAX_NODES = 15
-MIN_REDUNDANCY = 2
-MAX_REDUNDANCY = 4
-RENDER_MODE = False
+MIN_NODES = 50
+MAX_NODES = 50
+MIN_REDUNDANCY = 3
+MAX_REDUNDANCY = 5
+TRAINING_MODE = False  
+MODEL_PATH = "./checkpoints/ppo_spanning_tree_10000000_steps"
+TOTAL_TIMESTEPS = 10000000
 
-# Setup environment
-env = make_vec_env(lambda: SpanningTreeEnv(min_nodes=MIN_NODES, max_nodes=MAX_NODES, min_redundancy=MIN_REDUNDANCY, max_redundancy=MAX_REDUNDANCY, render_mode=RENDER_MODE), n_envs=10)
+def train(env, total_timesteps=10000000):
+    """Train the model."""
+    model = PPO("MultiInputPolicy", env, verbose=1, tensorboard_log="./tensorboard_logs/")
+    checkpoint_callback = CheckpointCallback(save_freq=100000, save_path='./checkpoints/', name_prefix='ppo_spanning_tree')
+    model.learn(total_timesteps=total_timesteps, callback=checkpoint_callback)
+    model.save("./ppo_spanning_tree_final")
+    return model
 
-# Setup model with tensorboard logging
-model = PPO("MultiInputPolicy", env, verbose=1, tensorboard_log="./tensorboard_logs/")
+def test(env, model_path):
+    """Test the model with visualization."""
+    model = PPO.load(model_path, env=env)
+    obs = env.reset()
+    while True:
+        action, _states = model.predict(obs, deterministic=False)
+        obs, rewards, done, info = env.step(action)
+        print(action)
+        if done:
+            break  # Exit the loop when the episode is done
 
-# Setup checkpoint saving every 100000 steps
-checkpoint_callback = CheckpointCallback(save_freq=100000, save_path='./checkpoints/',
-                                         name_prefix='ppo_spanning_tree')
+def main():
+    n_envs=1
+    render_mode = True
+    if TRAINING_MODE:
+        n_envs = 10
+        render_mode=False
 
-# Training the model with checkpointing
-model.learn(total_timesteps=10000000, callback=checkpoint_callback)
+    env = make_vec_env(lambda: SpanningTreeEnv(min_nodes=MIN_NODES, 
+                                               max_nodes=MAX_NODES, 
+                                               min_redundancy=MIN_REDUNDANCY, 
+                                               max_redundancy=MAX_REDUNDANCY, 
+                                               render_mode=render_mode), 
+                       n_envs=n_envs)
 
-# Evaluate the agent
-mean_reward, std_reward = evaluate_policy(model, model.get_env(), n_eval_episodes=10)
-print(f"Mean reward: {mean_reward} +/- {std_reward}")
+    if TRAINING_MODE:
+        train(env, total_timesteps=TOTAL_TIMESTEPS)
+    else:
+        test(env, MODEL_PATH)
 
-# Save the final model
-model.save("./ppo_spanning_tree")
-
-# Load the model
-# model = PPO.load("./ppo_spanning_tree")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+if __name__ == '__main__':
+    main()
 
 
+# import os
+# import gym
+# from stable_baselines3 import PPO
+# from stable_baselines3.common.env_util import make_vec_env
+# from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
+# from stable_baselines3.common.evaluation import evaluate_policy
+# from spanning_tree_env import SpanningTreeEnv
 
+# MIN_NODES = 5
+# MAX_NODES = 15
+# MIN_REDUNDANCY = 2
+# MAX_REDUNDANCY = 4
+# RENDER_MODE = False
 
+# # Setup environment
+# env = make_vec_env(lambda: SpanningTreeEnv(min_nodes=MIN_NODES, max_nodes=MAX_NODES, min_redundancy=MIN_REDUNDANCY, max_redundancy=MAX_REDUNDANCY, render_mode=RENDER_MODE), n_envs=10)
+
+# # Setup model with tensorboard logging
+# model = PPO("MultiInputPolicy", env, verbose=1, tensorboard_log="./tensorboard_logs/")
+
+# # Setup checkpoint saving every 100000 steps
+# checkpoint_callback = CheckpointCallback(save_freq=100000, save_path='./checkpoints/',
+#                                          name_prefix='ppo_spanning_tree')
+
+# # Training the model with checkpointing
+# model.learn(total_timesteps=10000000, callback=checkpoint_callback)
+
+# # Evaluate the agent
+# mean_reward, std_reward = evaluate_policy(model, model.get_env(), n_eval_episodes=10)
+# print(f"Mean reward: {mean_reward} +/- {std_reward}")
+
+# # Save the final model
+# model.save("./ppo_spanning_tree")
+
+# # Load the model
+# # model = PPO.load("./ppo_spanning_tree")
 
 
 

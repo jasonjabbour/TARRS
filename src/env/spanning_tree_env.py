@@ -12,7 +12,14 @@ from network_env import NetworkEnvironment
 SHOW_WEIGHT_LABELS = False 
 
 class SpanningTreeEnv(gym.Env):
-    def __init__(self, min_nodes, max_nodes, min_redundancy, max_redundancy, show_weight_labels=False, render_mode=False, max_ep_steps=100):
+    def __init__(self, min_nodes, 
+                       max_nodes, 
+                       min_redundancy, 
+                       max_redundancy, 
+                       show_weight_labels=False, 
+                       render_mode=False, 
+                       max_ep_steps=100, 
+                       node_size=700):
         super(SpanningTreeEnv, self).__init__()
         
         # Initialize parameters for the network environment
@@ -30,6 +37,9 @@ class SpanningTreeEnv(gym.Env):
         # Max Episode Steps
         self.max_ep_steps = max_ep_steps
         self.current_step = 0
+
+        # Visualization parameters
+        self.node_size = node_size
 
         # Initialize placeholders for the network environment and graphs
         self.network_env = None
@@ -209,6 +219,7 @@ class SpanningTreeEnv(gym.Env):
         # Render the current state of the environment
         if self.render_mode:
             self.render()
+            self.root.update()
 
         return self.get_state(), reward, done, {}
 
@@ -220,16 +231,16 @@ class SpanningTreeEnv(gym.Env):
         self.ax[2].clear()
         
         # Draw the original physical network
-        nx.draw(self.network, self.pos, with_labels=True, node_color='skyblue', node_size=700, edge_color='gray', ax=self.ax[0])
+        nx.draw(self.network, self.pos, with_labels=True, node_color='skyblue', node_size=self.node_size, edge_color='gray', ax=self.ax[0])
         self.ax[0].set_title("Original Physical Network")
         
         # Draw the current spanning tree
-        nx.draw(self.tree, self.pos, with_labels=True, node_color='lightgreen', node_size=700, edge_color='gray', ax=self.ax[1]) 
+        nx.draw(self.tree, self.pos, with_labels=True, node_color='lightgreen', node_size=self.node_size, edge_color='gray', ax=self.ax[1]) 
         self.ax[1].set_title("Spanning Tree")
 
         # Attacked Spanning Tree
         node_colors = ['red' if node in self.attacked_nodes else 'lightgreen' for node in self.tree.nodes()]
-        nx.draw(self.tree, self.pos, with_labels=True, node_color=node_colors, node_size=700, edge_color='gray', ax=self.ax[2])
+        nx.draw(self.tree, self.pos, with_labels=True, node_color=node_colors, node_size=self.node_size, edge_color='gray', ax=self.ax[2])
         self.ax[2].set_title("Attacked Spanning Tree")
 
         # Check if weight labels should be shown
@@ -260,12 +271,13 @@ class SpanningTreeEnv(gym.Env):
 # Example usage
 if __name__ == "__main__":
     # Create the SpanningTreeEnv environment
-    env = SpanningTreeEnv(min_nodes=5, 
-                          max_nodes=15, 
+    env = SpanningTreeEnv(min_nodes=50, 
+                          max_nodes=50, 
                           min_redundancy=2, 
                           max_redundancy=4, 
                           show_weight_labels=SHOW_WEIGHT_LABELS, 
-                          render_mode=True)
+                          render_mode=True, 
+                          node_size=250)
     
     # Reset the environment to start a new episode
     state = env.reset()
