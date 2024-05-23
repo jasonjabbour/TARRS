@@ -149,86 +149,71 @@ class SpanningTreeEnv(gym.Env):
             "attacked": attacked_vector
         }
     
+
     def step(self, action):
-
         # Unpack the action tuple
-        action_type, parent, child = action  
+        action_type, parent, child = action
+        
+        # Execute the action
+        valid_action = self.execute_action(action_type, parent, child)
+        
+        # Calculate reward and check if the goal is achieved (done)
+        reward, done = self.calculate_reward()
 
-        # Default penalty for invalid actions
-        reward = -1 
-        done = False
+        # Initialize truncated as False
         truncated = False
-
-        # Attempt to add a connection
-        if action_type == 0:  
-            if parent in self.tree.nodes and child in self.tree.nodes and not self.tree.has_edge(parent, child) and self.network.has_edge(parent, child):
-                self.tree.add_edge(parent, child, weight=self.network[parent][child]['weight'])
-                # Reward for a valid action
-                reward = 1 
-
-         # Attempt to remove a connection
-        elif action_type == 1: 
-            if self.tree.has_edge(parent, child):
-                self.tree.remove_edge(parent, child)
-                # Reward for a valid action
-                reward = 1  
-                # Additional reward for removing a connection from an attacked node
-                if parent in self.attacked_nodes or child in self.attacked_nodes:
-                    reward += 5  
-
-        # Check each attacked node if it is isolated
-        for node in self.attacked_nodes:
-            if all(not self.tree.has_edge(node, other) for other in self.tree.nodes if other != node):
-                # Reward for completely isolating an attacked node
-                reward += 5
-
-        # Check if attacked nodes are isolated
-        if all(not self.tree.has_edge(node, other) for node in self.attacked_nodes for other in self.tree.nodes if other != node):
-
-            # Reward for isolating attacked nodes
-            reward += 5
-
-            # All attacked nodes are isolated, now check the remaining graph
-            non_attacked_subgraph = self.tree.subgraph([n for n in self.tree.nodes if n not in self.attacked_nodes])
-
-            # Check if subgraph is connected
-            if nx.is_connected(non_attacked_subgraph):
-
-                # Calculate the current total weight of the tree
-                current_weight = sum(data['weight'] for u, v, data in non_attacked_subgraph.edges(data=True))
-                # Encourage lighter trees
-                # TODO. Normalize this since larger networks will have more cost
-                reward += 100 - current_weight
-
-                # Check if subgraph is a valid tree  
-                if nx.is_tree(non_attacked_subgraph):
-                    # Bonus for a valid spanning tree
-                    reward += 10  
-                    # End the episode if the tree is valid and connected
-                    done = True  
-                else:
-                    # Penalize if not a valid tree
-                    reward -= 2  
-            else:
-                # Penalize disconnection among non-attacked nodes
-                reward -= 2  
-        else:
-            # Penalty for not isolating attacked nodes
-            reward -= 1
-
+        
+        # Check if the maximum steps have been reached
         if self.current_step >= self.max_ep_steps:
-            done = True  # End the episode because the max step count has been reached
-            truncated = True
+            truncated = True  # Truncate the episode due to step count limit
+            done = True  # Still set done to True to end the episode
 
         # Increment timestep
         self.current_step += 1
 
-        # Render the current state of the environment
+        # Render the current state of the environment if required
         if self.render_mode:
             self.render()
             self.root.update()
 
-        return self.get_state(), reward, done, truncated, {}
+        return self.get_state(), reward, done, truncated
+
+    def execute_action(self, action_type, parent, child):
+        if action_type == 0:  # Add connection
+            if parent in self.tree.nodes and child in self.tree.nodes and not self.tree.has_edge(parent, child) and self.network.has_edge(parent, child):
+                self.tree.add_edge(parent, child, weight=self.network[parent][child]['weight'])
+                return True
+        elif action_type == 1:  # Remove connection
+            if self.tree.has_edge(parent, child):
+                self.tree.remove_edge(parent, child)
+                return True
+        return False
+
+    def calculate_reward(self):
+        reward = 0
+        done = False
+
+        # Reward for isolating attacked nodes
+        if self.is_attacked_isolated():
+            reward += 5
+        
+        # Check if the remaining graph forms a valid MST
+        non_attacked_subgraph = self.tree.subgraph([n for n in self.tree.nodes if n not in self.attacked_nodes])
+        if nx.is_connected(non_attacked_subgraph) and nx.is_tree(non_attacked_subgraph):
+            current_weight = sum(data['weight'] for u, v, data in non_attacked_subgraph.edges(data=True))
+            reward += 100 - current_weight  # Encourage lighter trees
+            done = True  # End the episode if a valid MST is formed
+        else:
+            reward -= 2  # Penalize if the subgraph is not a valid MST
+
+        return reward, done
+
+    def is_attacked_isolated(self):
+        # Check each attacked node if it is isolated
+        for node in self.attacked_nodes:
+            if all(not self.tree.has_edge(node, other) for other in self.tree.nodes if other != node):
+                return True
+        return False
 
 
     def render(self, mode='human'):
