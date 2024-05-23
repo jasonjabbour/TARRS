@@ -18,7 +18,7 @@ class SpanningTreeEnv(gym.Env):
                        max_redundancy, 
                        show_weight_labels=False, 
                        render_mode=False, 
-                       max_ep_steps=100, 
+                       max_ep_steps=150, 
                        node_size=700):
         super(SpanningTreeEnv, self).__init__()
         
@@ -164,29 +164,29 @@ class SpanningTreeEnv(gym.Env):
             if parent in self.tree.nodes and child in self.tree.nodes and not self.tree.has_edge(parent, child) and self.network.has_edge(parent, child):
                 self.tree.add_edge(parent, child, weight=self.network[parent][child]['weight'])
                 # Reward for a valid action
-                reward = .1 
+                reward = 1 
 
          # Attempt to remove a connection
         elif action_type == 1: 
             if self.tree.has_edge(parent, child):
                 self.tree.remove_edge(parent, child)
                 # Reward for a valid action
-                reward = .1  
+                reward = 1  
                 # Additional reward for removing a connection from an attacked node
                 if parent in self.attacked_nodes or child in self.attacked_nodes:
-                    reward += 1  
+                    reward += 5  
 
         # Check each attacked node if it is isolated
         for node in self.attacked_nodes:
             if all(not self.tree.has_edge(node, other) for other in self.tree.nodes if other != node):
                 # Reward for completely isolating an attacked node
-                reward += 1
+                reward += 5
 
         # Check if attacked nodes are isolated
         if all(not self.tree.has_edge(node, other) for node in self.attacked_nodes for other in self.tree.nodes if other != node):
 
             # Reward for isolating attacked nodes
-            reward += 1
+            reward += 5
 
             # All attacked nodes are isolated, now check the remaining graph
             non_attacked_subgraph = self.tree.subgraph([n for n in self.tree.nodes if n not in self.attacked_nodes])
@@ -198,7 +198,7 @@ class SpanningTreeEnv(gym.Env):
                 current_weight = sum(data['weight'] for u, v, data in non_attacked_subgraph.edges(data=True))
                 # Encourage lighter trees
                 # TODO. Normalize this since larger networks will have more cost
-                reward += 10 - current_weight
+                reward += 100 - current_weight
 
                 # Check if subgraph is a valid tree  
                 if nx.is_tree(non_attacked_subgraph):
@@ -208,13 +208,13 @@ class SpanningTreeEnv(gym.Env):
                     done = True  
                 else:
                     # Penalize if not a valid tree
-                    reward -= .2  
+                    reward -= 2  
             else:
                 # Penalize disconnection among non-attacked nodes
-                reward -= .2  
+                reward -= 2  
         else:
             # Penalty for not isolating attacked nodes
-            reward -= .1
+            reward -= 1
 
         if self.current_step >= self.max_ep_steps:
             done = True  # End the episode because the max step count has been reached

@@ -8,10 +8,10 @@ from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.evaluation import evaluate_policy
 from spanning_tree_env import SpanningTreeEnv
 
-MIN_NODES = 50
-MAX_NODES = 50
-MIN_REDUNDANCY = 3
-MAX_REDUNDANCY = 5
+MIN_NODES = 30
+MAX_NODES = 30
+MIN_REDUNDANCY = 2
+MAX_REDUNDANCY = 4
 TRAINING_MODE = True  
 MODEL_PATH = "./checkpoints/model1/ppo_spanning_tree_10000000_steps"
 TOTAL_TIMESTEPS = 30000000
@@ -45,7 +45,7 @@ def main():
     n_envs = 1
     render_mode = True
     if TRAINING_MODE:
-        n_envs = 10
+        n_envs = 20
         render_mode = False
 
     env = make_vec_env(lambda: SpanningTreeEnv(min_nodes=MIN_NODES, 
