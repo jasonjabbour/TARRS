@@ -10,11 +10,12 @@ from spanning_tree_env import SpanningTreeEnv
 
 MIN_NODES = 30
 MAX_NODES = 30
-MIN_REDUNDANCY = 2
+MIN_REDUNDANCY = 3
 MAX_REDUNDANCY = 4
-TRAINING_MODE = True  
-MODEL_PATH = "./checkpoints/model1/ppo_spanning_tree_10000000_steps"
-TOTAL_TIMESTEPS = 30000000
+NUM_ATTACKED_NODES = 1
+TRAINING_MODE = False  
+MODEL_PATH = "./checkpoints/model4/ppo_spanning_tree_final"
+TOTAL_TIMESTEPS = 10000000
 
 def train(env, total_timesteps=10000000):
     """Train the model."""
@@ -31,14 +32,18 @@ def test(env, model_path):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Testing on device: {device}")
     model = PPO.load(model_path, env=env, device=device)
-    obs, _ = env.reset()
-    print(obs)
+    obs = env.reset()
+
+    total_reward = 0
     while True:
-        action, _states = model.predict(obs, deterministic=False)
-        obs, rewards, done, info = env.step(action)
-        print(action)
+        action, _states = model.predict(obs, deterministic=True)
+        obs, reward, done, info = env.step(action)
+        print(action, reward)
+        total_reward+=reward
         if done:
             break  # Exit the loop when the episode is done
+    
+    print(f"Total Reward: {total_reward}")
 
 def main():
     print("CUDA available:", torch.cuda.is_available())  # Log if CUDA is available
@@ -52,6 +57,7 @@ def main():
                                                max_nodes=MAX_NODES, 
                                                min_redundancy=MIN_REDUNDANCY, 
                                                max_redundancy=MAX_REDUNDANCY, 
+                                               num_attacked_nodes=NUM_ATTACKED_NODES,
                                                render_mode=render_mode), 
                        n_envs=n_envs)
 

@@ -16,9 +16,10 @@ class SpanningTreeEnv(gym.Env):
                        max_nodes, 
                        min_redundancy, 
                        max_redundancy, 
+                       num_attacked_nodes=2,
                        show_weight_labels=False, 
                        render_mode=False, 
-                       max_ep_steps=150, 
+                       max_ep_steps=100, 
                        node_size=700):
         super(SpanningTreeEnv, self).__init__()
         
@@ -27,6 +28,7 @@ class SpanningTreeEnv(gym.Env):
         self.max_nodes = max_nodes
         self.min_redundancy = min_redundancy
         self.max_redundancy = max_redundancy
+        self.num_attacked_nodes = num_attacked_nodes
 
         # Parameter to control weight label rendering
         self.show_weight_labels = show_weight_labels 
@@ -176,44 +178,86 @@ class SpanningTreeEnv(gym.Env):
             self.render()
             self.root.update()
 
-        return self.get_state(), reward, done, truncated
+        return self.get_state(), reward, done, truncated, {}
+
+    # def execute_action(self, action_type, parent, child):
+    #     if action_type == 1:  # Add connection
+    #         if parent in self.tree.nodes and child in self.tree.nodes and not self.tree.has_edge(parent, child) and self.network.has_edge(parent, child):
+    #             self.tree.add_edge(parent, child, weight=self.network[parent][child]['weight'])
+    #             return True
+    #     elif action_type == 0:  # Remove connection
+    #         if self.tree.has_edge(parent, child):
+    #             self.tree.remove_edge(parent, child)
+    #             return True
+    #     return False
 
     def execute_action(self, action_type, parent, child):
-        if action_type == 0:  # Add connection
-            if parent in self.tree.nodes and child in self.tree.nodes and not self.tree.has_edge(parent, child) and self.network.has_edge(parent, child):
-                self.tree.add_edge(parent, child, weight=self.network[parent][child]['weight'])
+        # Apply any action as requested by the agent
+        if action_type == 1:  # Add connection
+            if not self.tree.has_edge(parent, child):  # Only add if it doesn't already exist
+                # Get the weight from the physical network; if not present, use a large weight like 100
+                self.tree.add_edge(parent, child, weight=self.network.get_edge_data(parent, child, {}).get('weight', 100))
                 return True
-        elif action_type == 1:  # Remove connection
+        elif action_type == 0:  # Remove connection
             if self.tree.has_edge(parent, child):
                 self.tree.remove_edge(parent, child)
                 return True
         return False
 
+    # def calculate_reward(self):
+    #     reward = 0
+    #     done = False
+
+    #     # Check if all attacked nodes are isolated
+    #     all_isolated = self.is_attacked_isolated()
+
+    #     if all_isolated:
+    #         reward += 5  # Reward for isolating attacked nodes
+    #         # Extract the subgraph of non-attacked nodes which should form the MST
+    #         non_attacked_subgraph = self.tree.subgraph([n for n in self.tree.nodes if n not in self.attacked_nodes])
+
+    #         if nx.is_connected(non_attacked_subgraph) and nx.is_tree(non_attacked_subgraph):
+    #             current_weight = sum(data['weight'] for u, v, data in non_attacked_subgraph.edges(data=True))
+    #             reward += 10 - current_weight/100  # Encourage lighter trees
+    #             done = True  # End the episode if a valid MST is formed
+    #         else:
+    #             reward -= 1  # Penalize if the subgraph is not a valid MST
+    #     else:
+    #         reward -= 1  # Penalize if not all attacked nodes are isolated
+
+    #     return reward, done
+
     def calculate_reward(self):
         reward = 0
         done = False
 
-        # Reward for isolating attacked nodes
-        if self.is_attacked_isolated():
-            reward += 5
-        
-        # Check if the remaining graph forms a valid MST
-        non_attacked_subgraph = self.tree.subgraph([n for n in self.tree.nodes if n not in self.attacked_nodes])
-        if nx.is_connected(non_attacked_subgraph) and nx.is_tree(non_attacked_subgraph):
-            current_weight = sum(data['weight'] for u, v, data in non_attacked_subgraph.edges(data=True))
-            reward += 100 - current_weight  # Encourage lighter trees
-            done = True  # End the episode if a valid MST is formed
+        # Heavy penalties for invalid connections
+        for u, v in self.tree.edges():
+            if not self.network.has_edge(u, v):  # Penalize connections that don't exist in the physical network
+                reward -= 10  # Adjust penalty as needed
+
+        # Check if all attacked nodes are isolated
+        all_isolated = self.is_attacked_isolated()
+        if all_isolated:
+            reward += 5  # Reward for isolating attacked nodes
+            non_attacked_subgraph = self.tree.subgraph([n for n in self.tree.nodes if n not in self.attacked_nodes])
+            if nx.is_connected(non_attacked_subgraph) and nx.is_tree(non_attacked_subgraph):
+                current_weight = sum(data['weight'] for u, v, data in non_attacked_subgraph.edges(data=True))
+                reward += 10 - current_weight/100  # Encourage lighter trees
+                done = True  # End the episode if a valid MST is formed
+            else:
+                reward -= 1  # Penalize if the subgraph is not a valid MST
         else:
-            reward -= 2  # Penalize if the subgraph is not a valid MST
+            reward -= 1  # Penalize if not all attacked nodes are isolated
 
         return reward, done
 
     def is_attacked_isolated(self):
-        # Check each attacked node if it is isolated
+        # Check each attacked node to see if it is completely isolated
         for node in self.attacked_nodes:
-            if all(not self.tree.has_edge(node, other) for other in self.tree.nodes if other != node):
-                return True
-        return False
+            if any(self.tree.has_edge(node, other) for other in self.tree.nodes if other != node):
+                return False
+        return True
 
 
     def render(self, mode='human'):
@@ -253,20 +297,21 @@ class SpanningTreeEnv(gym.Env):
         self.root.quit()
         self.root.destroy()
 
-    def simulate_attack(self, num_attacks=2):
+    def simulate_attack(self):
         # TODO: Move to separate class
         # TODO: Vary the number of attacked nodes
         # TODO: Intelligent choice of nodes to attack
         # Randomly select a few nodes to attack
-        self.attacked_nodes = set(np.random.choice(self.network.nodes(), num_attacks, replace=False))
+        self.attacked_nodes = set(np.random.choice(self.network.nodes(), self.num_attacked_nodes, replace=False))
         
 # Example usage
 if __name__ == "__main__":
     # Create the SpanningTreeEnv environment
-    env = SpanningTreeEnv(min_nodes=50, 
-                          max_nodes=50, 
-                          min_redundancy=2, 
+    env = SpanningTreeEnv(min_nodes=5, 
+                          max_nodes=5, 
+                          min_redundancy=3, 
                           max_redundancy=4, 
+                          num_attacked_nodes=1,
                           show_weight_labels=SHOW_WEIGHT_LABELS, 
                           render_mode=True, 
                           node_size=250)
@@ -281,8 +326,9 @@ if __name__ == "__main__":
         action = env.action_space.sample()
 
         # Execute the action and get the new state, reward, and done flag
-        state, reward, done, _ = env.step(action)
-        print(action)
+        state, reward, done, _, _ = env.step(action)
+        print(action, reward)
+        time.sleep(.5)
         
         # Update the Tkinter window
         env.root.update()
