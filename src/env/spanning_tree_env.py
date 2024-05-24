@@ -47,20 +47,24 @@ class SpanningTreeEnv(gym.Env):
         self.network_env = None
         self.network = None
         self.tree = None
+
+        # Initialize placeholder for last action
+        self.last_action = None
         
         # Initialize placeholders for the number of nodes, action space, and observation space
         self.num_nodes = max_nodes 
 
         # Define the action space as pairs of nodes (action_type ,parent, child)
         self.action_space = spaces.MultiDiscrete([2, self.num_nodes, self.num_nodes])
-
+        
         # Define the observation space 
         # TODO currently observation space is max number of nodes. Explore embedding to an equal dimension.
         self.observation_space = spaces.Dict({
             "full_network": spaces.Box(low=0, high=1, shape=(self.num_nodes, self.num_nodes), dtype=np.int32),
             "mst": spaces.Box(low=0, high=1, shape=(self.num_nodes, self.num_nodes), dtype=np.int32),
             "weights": spaces.Box(low=0, high=1, shape=(self.num_nodes, self.num_nodes), dtype=np.int32),
-            "attacked": spaces.Box(low=0, high=1, shape=(self.num_nodes,), dtype=np.int32)
+            "attacked": spaces.Box(low=0, high=1, shape=(self.num_nodes,), dtype=np.int32),
+            "last_action": spaces.Box(low=0, high=1, shape=(3,), dtype=np.int32)
         })
 
         # Initialize placeholder for node positions
@@ -112,6 +116,9 @@ class SpanningTreeEnv(gym.Env):
         # Simulate attack
         self.simulate_attack()
 
+        # Reset last action
+        self.last_action = np.zeros(3, dtype=np.int32)  
+
         # Return the initial state
         return self.get_state(), {}
 
@@ -148,7 +155,8 @@ class SpanningTreeEnv(gym.Env):
             "full_network": full_net_matrix_padded,
             "mst": mst_matrix_padded,
             "weights": weights_matrix_padded,
-            "attacked": attacked_vector
+            "attacked": attacked_vector, 
+            "last_action": self.last_action,
         }
     
 
@@ -160,7 +168,10 @@ class SpanningTreeEnv(gym.Env):
         valid_action = self.execute_action(action_type, parent, child)
         
         # Calculate reward and check if the goal is achieved (done)
-        reward, done = self.calculate_reward()
+        reward, done = self.calculate_reward(action)
+
+        # Update last action taken
+        self.last_action = np.array(action)  
 
         # Initialize truncated as False
         truncated = False
@@ -180,16 +191,6 @@ class SpanningTreeEnv(gym.Env):
 
         return self.get_state(), reward, done, truncated, {}
 
-    # def execute_action(self, action_type, parent, child):
-    #     if action_type == 1:  # Add connection
-    #         if parent in self.tree.nodes and child in self.tree.nodes and not self.tree.has_edge(parent, child) and self.network.has_edge(parent, child):
-    #             self.tree.add_edge(parent, child, weight=self.network[parent][child]['weight'])
-    #             return True
-    #     elif action_type == 0:  # Remove connection
-    #         if self.tree.has_edge(parent, child):
-    #             self.tree.remove_edge(parent, child)
-    #             return True
-    #     return False
 
     def execute_action(self, action_type, parent, child):
         # Apply any action as requested by the agent
@@ -204,6 +205,63 @@ class SpanningTreeEnv(gym.Env):
                 return True
         return False
 
+    def calculate_reward(self, action):
+        reward = 0
+        done = False
+
+        # Penalize repeating the same action
+        if np.array_equal(action, self.last_action):
+            reward -= 10
+
+        # Heavy penalties for invalid connections
+        for u, v in self.tree.edges():
+            if not self.network.has_edge(u, v):  # Penalize connections that don't exist in the physical network
+                reward -= 10  # Adjust penalty as needed
+
+        # Reward/Penalty for actions on attacked nodes
+        for node in self.attacked_nodes:
+            if action[1] == node or action[2] == node:
+                # Reward for removing connection
+                if action[0] == 0:  
+                    reward += 5
+                # Penalty for adding connection
+                elif action[0] == 1:  
+                    reward -= 10
+
+        # Check if all attacked nodes are isolated
+        all_isolated = self.is_attacked_isolated()
+        if all_isolated:
+            reward += 20  # Reward for isolating attacked nodes
+            non_attacked_subgraph = self.tree.subgraph([n for n in self.tree.nodes if n not in self.attacked_nodes])
+            if nx.is_connected(non_attacked_subgraph) and nx.is_tree(non_attacked_subgraph):
+                current_weight = sum(data['weight'] for u, v, data in non_attacked_subgraph.edges(data=True))
+                reward += 10 - current_weight/100  # Encourage lighter trees
+                done = True  # End the episode if a valid MST is formed
+            else:
+                reward -= 1  # Penalize if the subgraph is not a valid MST
+        else:
+            reward -= 1  # Penalize if not all attacked nodes are isolated
+
+        return reward, done
+
+    def is_attacked_isolated(self):
+        # Check each attacked node to see if it is completely isolated
+        for node in self.attacked_nodes:
+            if any(self.tree.has_edge(node, other) for other in self.tree.nodes if other != node):
+                return False
+        return True
+
+    # def execute_action(self, action_type, parent, child):
+    #     if action_type == 1:  # Add connection
+    #         if parent in self.tree.nodes and child in self.tree.nodes and not self.tree.has_edge(parent, child) and self.network.has_edge(parent, child):
+    #             self.tree.add_edge(parent, child, weight=self.network[parent][child]['weight'])
+    #             return True
+    #     elif action_type == 0:  # Remove connection
+    #         if self.tree.has_edge(parent, child):
+    #             self.tree.remove_edge(parent, child)
+    #             return True
+    #     return False
+    
     # def calculate_reward(self):
     #     reward = 0
     #     done = False
@@ -226,39 +284,6 @@ class SpanningTreeEnv(gym.Env):
     #         reward -= 1  # Penalize if not all attacked nodes are isolated
 
     #     return reward, done
-
-    def calculate_reward(self):
-        reward = 0
-        done = False
-
-        # Heavy penalties for invalid connections
-        for u, v in self.tree.edges():
-            if not self.network.has_edge(u, v):  # Penalize connections that don't exist in the physical network
-                reward -= 10  # Adjust penalty as needed
-
-        # Check if all attacked nodes are isolated
-        all_isolated = self.is_attacked_isolated()
-        if all_isolated:
-            reward += 5  # Reward for isolating attacked nodes
-            non_attacked_subgraph = self.tree.subgraph([n for n in self.tree.nodes if n not in self.attacked_nodes])
-            if nx.is_connected(non_attacked_subgraph) and nx.is_tree(non_attacked_subgraph):
-                current_weight = sum(data['weight'] for u, v, data in non_attacked_subgraph.edges(data=True))
-                reward += 10 - current_weight/100  # Encourage lighter trees
-                done = True  # End the episode if a valid MST is formed
-            else:
-                reward -= 1  # Penalize if the subgraph is not a valid MST
-        else:
-            reward -= 1  # Penalize if not all attacked nodes are isolated
-
-        return reward, done
-
-    def is_attacked_isolated(self):
-        # Check each attacked node to see if it is completely isolated
-        for node in self.attacked_nodes:
-            if any(self.tree.has_edge(node, other) for other in self.tree.nodes if other != node):
-                return False
-        return True
-
 
     def render(self, mode='human'):
         # Clear the previous plots
