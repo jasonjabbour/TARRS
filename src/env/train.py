@@ -7,16 +7,16 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, CallbackList
 from spanning_tree_env import SpanningTreeEnv
 
-MIN_NODES = 30
-MAX_NODES = 30
+MIN_NODES = 15
+MAX_NODES = 15
 MIN_REDUNDANCY = 3
 MAX_REDUNDANCY = 4
 NUM_ATTACKED_NODES = 1
 TRAINING_MODE = False
-RENDER_EVAL_ENV = True
-TOTAL_TIMESTEPS = 10000000
+RENDER_EVAL_ENV = False
+TOTAL_TIMESTEPS = 60000000
 MODEL_DIR_BASE = "./models"
-MODEL_PATH_4_INFERENCE = "./models/model5/ppo_spanning_tree_final"
+MODEL_PATH_4_INFERENCE = "./models/model19/ppo_spanning_tree_final"
 
 def create_incremental_dir(base_path, prefix="model"):
     """Create a directory with an incrementing index to avoid overwriting previous models."""
