@@ -161,7 +161,8 @@ class SpanningTreeEnv(gym.Env):
             "attacked": attacked_matrix,
         }
 
-    def step(self, action):     
+    def step(self, action):    
+
         # Execute the action
         valid_action, invalid_action, connected_to_attacked_node, disconnected_from_attacked_node = self.execute_action(action)
         
@@ -197,9 +198,10 @@ class SpanningTreeEnv(gym.Env):
         # Removed connection to attacked node
         disconnected_from_attacked_node = 0
 
-        # Iterate over all possible connections (upper triangle not needed in full matrix approach)
+        # Iterate over all possible connections 
         index = 0
         for i in range(self.num_nodes):
+            # lower triangle not needed in full matrix approach
             for j in range(i + 1, self.num_nodes):
                 # Check the action for the edge (i, j)
                 if action[index] == 1 and not self.tree.has_edge(i, j):
@@ -225,34 +227,38 @@ class SpanningTreeEnv(gym.Env):
         return node1 in self.attacked_nodes or node2 in self.attacked_nodes
 
     def calculate_reward(self, valid_action, invalid_action, connected_to_attacked_node, disconnected_from_attacked_node):
-        reward = 0
+        
+        reward = -.1
         done = False
 
-        # Apply penalties and rewards for actions related to attacked nodes
-        reward -= 1 * connected_to_attacked_node
-        reward += .5 * disconnected_from_attacked_node
+        # Terminate episode if invalid action is taken
+        if invalid_action >= 1:
+            done = True 
+            reward = -10
+            return reward, done
 
-        # Check for connections to attacked nodes and penalize for each existing connection
-        for node in self.attacked_nodes:
-            for neighbor in self.tree.neighbors(node):
-                reward -= 0.5  # Penalize for each connection to an attacked node
+        # # Apply penalties and rewards for actions related to attacked nodes
+        # reward -= 1 * connected_to_attacked_node
+        # reward += .5 * disconnected_from_attacked_node
 
-        # Heavy penalties for invalid connection attempts
-        reward -= 1 * invalid_action
+        # # Check for connections to attacked nodes and penalize for each existing connection
+        # for node in self.attacked_nodes:
+        #     for neighbor in self.tree.neighbors(node):
+        #         reward -= 0.5  # Penalize for each connection to an attacked node
 
         # Check if all attacked nodes are isolated
         all_isolated = self.is_attacked_isolated()
         if all_isolated:
-            reward += 20  # Reward for isolating attacked nodes
+            # reward += .5  # Reward for isolating attacked nodes
             non_attacked_subgraph = self.tree.subgraph([n for n in self.tree.nodes if n not in self.attacked_nodes])
             if nx.is_connected(non_attacked_subgraph) and nx.is_tree(non_attacked_subgraph):
                 current_weight = sum(data['weight'] for u, v, data in non_attacked_subgraph.edges(data=True))
                 reward += 50 - current_weight/100  # Encourage lighter tree
                 done = True  # End the episode if a valid MST is formed
-            else:
-                reward -= .5  # Penalize if the subgraph is not a valid MST
-        else:
-            reward -= .5  # Penalize if not all attacked nodes are isolated
+        #     else:
+        #         reward -= .5  # Penalize if the subgraph is not a valid MST
+        # else:
+        #     reward -= .5  # Penalize if not all attacked nodes are isolated
 
         return reward, done
 

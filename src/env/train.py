@@ -12,11 +12,12 @@ MAX_NODES = 15
 MIN_REDUNDANCY = 3
 MAX_REDUNDANCY = 4
 NUM_ATTACKED_NODES = 1
-TRAINING_MODE = False
+TRAINING_MODE = True
 RENDER_EVAL_ENV = False
-TOTAL_TIMESTEPS = 60000000
+SHOW_WEIGHT_LABELS = False
+TOTAL_TIMESTEPS = 30000000
 MODEL_DIR_BASE = "./models"
-MODEL_PATH_4_INFERENCE = "./models/model19/ppo_spanning_tree_final"
+MODEL_PATH_4_INFERENCE = "./models/model8/best_model/best_model"
 
 def create_incremental_dir(base_path, prefix="model"):
     """Create a directory with an incrementing index to avoid overwriting previous models."""
@@ -63,6 +64,7 @@ def test(env, model_path):
         print(action, reward)
         total_reward += reward
         if done:
+            time.sleep(30)
             break  # Exit the loop when the episode is done
     print(f"Total Reward: {total_reward}")
 
@@ -76,7 +78,8 @@ def main():
                                                min_redundancy=MIN_REDUNDANCY, 
                                                max_redundancy=MAX_REDUNDANCY, 
                                                num_attacked_nodes=NUM_ATTACKED_NODES, 
-                                               render_mode=render_mode), 
+                                               render_mode=render_mode, 
+                                               show_weight_labels=SHOW_WEIGHT_LABELS), 
                                                n_envs=n_envs)
 
     if TRAINING_MODE:
