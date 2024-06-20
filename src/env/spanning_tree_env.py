@@ -10,25 +10,42 @@ import time
 from network_env import NetworkEnvironment
 
 SHOW_WEIGHT_LABELS = False 
+# Number of nodes that network increases by every difficulty level
+NUM_NODE_INCREASE_RATE_PER_LEVEL = 5
+# Number of nodes that can be attacked increased by every difficulty level
+NUM_ATTACKED_NODE_INCREASE_RATE_PER_LEVEL = 1
 
 class SpanningTreeEnv(gym.Env):
     def __init__(self, min_nodes, 
                        max_nodes, 
                        min_redundancy, 
                        max_redundancy, 
-                       num_attacked_nodes=2,
+                       final_difficulty_level=10,
+                       num_episode_cooldown=400, 
+                       min_attacked_nodes=1,
+                       max_attacked_nodes=2,
                        show_weight_labels=False, 
                        render_mode=False, 
                        max_ep_steps=100, 
                        node_size=700):
         super(SpanningTreeEnv, self).__init__()
-        
+
         # Initialize parameters for the network environment
         self.min_nodes = min_nodes
         self.max_nodes = max_nodes
         self.min_redundancy = min_redundancy
         self.max_redundancy = max_redundancy
-        self.num_attacked_nodes = num_attacked_nodes
+        self.min_attacked_nodes = min_attacked_nodes
+        self.max_attacked_nodes = max_attacked_nodes
+
+        # Curricula Parameters 
+        self.current_level = 1 # Initial Level
+        self.update_level_parameters() # Initialize environment parameters
+        self.performance_history = [] # Performance tracking
+        self.performance_threshold = 40  # Define a suitable threshold for your task
+        self.final_difficulty_level = final_difficulty_level # max difficulty level
+        self.num_episode_cooldown = num_episode_cooldown # number of episodes before allowing level increase
+        self.num_nodes_history = [] # number of nodes in a network tracking
 
         # Parameter to control weight label rendering
         self.show_weight_labels = show_weight_labels 
@@ -49,7 +66,7 @@ class SpanningTreeEnv(gym.Env):
         self.tree = None
        
         # Initialize placeholders for the number of nodes, action space, and observation space
-        self.num_nodes = max_nodes 
+        self.max_difficulty_num_nodes = NUM_NODE_INCREASE_RATE_PER_LEVEL *  self.final_difficulty_level
 
         # Define action space as adjacency matrix
         # Since the action is symmetric, only define the upper triangular part
@@ -57,18 +74,19 @@ class SpanningTreeEnv(gym.Env):
         # self.action_space = spaces.MultiBinary(self.max_nodes * self.max_nodes)
 
         # number of possible edges in an undirected graph without self-loops
-        num_edges = int(self.num_nodes * (self.num_nodes - 1) / 2) 
+        self.max_difficulty_max_num_edges = int(self.max_difficulty_num_nodes * (self.max_difficulty_num_nodes - 1) / 2) 
 
         # Flat array representing only the upper triangle of the adjacency matrix.
-        self.action_space = gym.spaces.MultiBinary(num_edges)
+        self.action_space = spaces.MultiBinary(self.max_difficulty_max_num_edges)
 
         # Define the observation space 
         # TODO currently observation space is max number of nodes. Explore embedding to an equal dimension.
         self.observation_space = spaces.Dict({
-            "full_network": spaces.Box(low=0, high=1, shape=(self.num_nodes, self.num_nodes), dtype=np.int32),
-            "mst": spaces.Box(low=0, high=1, shape=(self.num_nodes, self.num_nodes), dtype=np.int32),
-            "weights": spaces.Box(low=0, high=10, shape=(self.num_nodes, self.num_nodes), dtype=np.int32),
-            "attacked": spaces.Box(low=0, high=1, shape=(self.num_nodes, self.num_nodes), dtype=np.int32),
+            "full_network": spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.int32),
+            "mst": spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.int32),
+            "weights": spaces.Box(low=0, high=10, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.int32),
+            "attacked": spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.int32),
+            "action_mask": spaces.MultiBinary(self.max_difficulty_max_num_edges)
         })
 
         # Initialize placeholder for node positions
@@ -89,11 +107,38 @@ class SpanningTreeEnv(gym.Env):
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
 
+    def update_level_parameters(self):
+        self.max_nodes = NUM_NODE_INCREASE_RATE_PER_LEVEL * self.current_level
+        self.max_attacked_nodes+= NUM_ATTACKED_NODE_INCREASE_RATE_PER_LEVEL
+
+    def should_level_up(self):
+
+        # Don't go past a certain level otherwise the action space is too small
+        if self.current_level >= self.final_difficulty_level:
+            return False
+
+        # Check performance history to decide on leveling up
+        if len(self.performance_history) >= self.num_episode_cooldown:
+            average_performance = sum(self.performance_history) / len(self.performance_history)
+            return average_performance > self.performance_threshold
+        return False
+
     def reset(self, seed=None):
 
         # Set the random seed
         if seed is not None:
             np.random.seed(seed)
+
+        # Evaluate if it's time to level up before resetting
+        if self.should_level_up():
+            self.current_level += 1
+            # Update the env characteristics such as min and max nodes
+            self.update_level_parameters()
+            self.performance_history = []  # Reset performance history
+            print(f"Leveling up! Now at Level {self.current_level}")
+            print(f"Max number of nodes at this level: {self.max_nodes}")
+            print(f"Average number of nodes in the past level: {sum(self.num_nodes_history)/ len(self.num_nodes_history)}")
+            self.num_nodes_history = [] # Reset num nodes history
 
         # Reset timestep
         self.current_step = 0 
@@ -116,9 +161,14 @@ class SpanningTreeEnv(gym.Env):
         
         # Get the number of nodes in the current network
         self.num_nodes = self.network_env.num_nodes
+        # Keep track of number of nodes in each env
+        self.num_nodes_history.append(self.num_nodes)
 
         # Simulate attack
         self.simulate_attack()
+
+        # Calculate max number of edges for this network
+        self.current_network_max_num_edges = int(self.num_nodes * (self.num_nodes - 1) / 2) 
 
         # Return the initial state
         return self.get_state(), {}
@@ -126,7 +176,7 @@ class SpanningTreeEnv(gym.Env):
     def get_state(self):
 
         # Function to pad matrices to the maximum node size
-        size = self.max_nodes
+        size = self.max_difficulty_num_nodes
 
         # Convert the full network and MST to adjacency matrices
         full_net_matrix = nx.to_numpy_array(self.network, dtype=int)
@@ -134,6 +184,7 @@ class SpanningTreeEnv(gym.Env):
 
         # Pad the full network matrix
         full_net_matrix_padded = np.zeros((size, size), dtype=int)
+        print(full_net_matrix)
         full_net_matrix_padded[:full_net_matrix.shape[0], :full_net_matrix.shape[1]] = full_net_matrix
 
         # Pad the MST matrix
@@ -153,13 +204,27 @@ class SpanningTreeEnv(gym.Env):
             # Mark entire column to indicate this node is attacked
             attacked_matrix[:, node] = 1  
 
+        # Get action mask
+        action_mask = self.get_action_mask()
+
         # Complete State: Ensure all parts are padded to the maximum size
         return {
             "full_network": full_net_matrix_padded,
             "mst": mst_matrix_padded,
             "weights": weights_matrix_padded,
             "attacked": attacked_matrix,
+            "action_mask": action_mask,
         }
+
+    def get_action_mask(self):
+        
+        # Initialize mask with zeros
+        action_mask = np.zeros(self.action_space.shape[0], dtype=int)
+        # Activate the mask for the valid actions based on 
+        # number of valid edges (actions) for the current number of active nodes
+        action_mask[:self.current_network_max_num_edges] = 1
+        
+        return action_mask
 
     def step(self, action):    
 
@@ -184,6 +249,9 @@ class SpanningTreeEnv(gym.Env):
         if self.render_mode:
             self.render()
             self.root.update()
+        
+        # Store the reward to indicate if difficulty level should increase
+        self.performance_history.append(reward)
 
         return self.get_state(), reward, done, truncated, {}
 
@@ -200,9 +268,9 @@ class SpanningTreeEnv(gym.Env):
 
         # Iterate over all possible connections 
         index = 0
-        for i in range(self.num_nodes):
+        for i in range(self.max_difficulty_num_nodes):
             # lower triangle not needed in full matrix approach
-            for j in range(i + 1, self.num_nodes):
+            for j in range(i + 1, self.max_difficulty_num_nodes):
                 # Check the action for the edge (i, j)
                 if action[index] == 1 and not self.tree.has_edge(i, j):
                     if self.network.has_edge(i, j):
@@ -231,11 +299,11 @@ class SpanningTreeEnv(gym.Env):
         reward = -.1
         done = False
 
-        # Terminate episode if invalid action is taken
-        if invalid_action >= 1:
-            done = True 
-            reward = -10
-            return reward, done
+        # # Terminate episode if invalid action is taken
+        # if invalid_action >= 1:
+        #     done = True 
+        #     reward = -10
+        #     return reward, done
 
         # # Apply penalties and rewards for actions related to attacked nodes
         # reward -= 1 * connected_to_attacked_node
@@ -260,6 +328,7 @@ class SpanningTreeEnv(gym.Env):
         # else:
         #     reward -= .5  # Penalize if not all attacked nodes are isolated
 
+        reward = 42
         return reward, done
 
     def is_attacked_isolated(self):
@@ -310,6 +379,13 @@ class SpanningTreeEnv(gym.Env):
         # TODO: Move to separate class
         # TODO: Vary the number of attacked nodes
         # TODO: Intelligent choice of nodes to attack
+
+        # Find max possible attacks since num nodes might be less than number of attacks
+        possible_attacks = min(self.num_nodes - 2, self.max_attacked_nodes)
+
+        # Randomly decide the number of nodes to attack within the given range
+        self.num_attacked_nodes = np.random.randint(self.min_attacked_nodes, possible_attacks + 1)
+
         # Randomly select a few nodes to attack
         self.attacked_nodes = set(np.random.choice(self.network.nodes(), self.num_attacked_nodes, replace=False))
         
@@ -320,9 +396,13 @@ if __name__ == "__main__":
                           max_nodes=5, 
                           min_redundancy=3, 
                           max_redundancy=4, 
-                          num_attacked_nodes=1,
+                          min_attacked_nodes=1, 
+                          max_attacked_nodes=2,
+                          final_difficulty_level=5,
+                          num_episode_cooldown=10, 
                           show_weight_labels=SHOW_WEIGHT_LABELS, 
                           render_mode=True, 
+                          max_ep_steps=5, 
                           node_size=250)
     
     # Reset the environment to start a new episode
@@ -330,18 +410,21 @@ if __name__ == "__main__":
     done = False
     
     # Run the simulation loop until the episode is done
-    while not done:
+    while True:
         # Select a random action from the action space
         action = env.action_space.sample()
 
         # Execute the action and get the new state, reward, and done flag
         state, reward, done, _, _ = env.step(action)
-        print(f' Action: \n {action} , Reward {reward}')
+        # print(f' Action: \n {action} , Reward {reward}')
+        print(state['full_network'])
         time.sleep(.5)
-        
         
         # Update the Tkinter window
         env.root.update()
+
+        if done:
+            state = env.reset()
     
     print("Done")
     time.sleep(30)
