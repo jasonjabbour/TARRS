@@ -83,4 +83,5 @@ if __name__ == '__main__':
     # Create and visualize the network
     network_env = NetworkEnvironment(min_nodes, max_nodes, min_redundancy, max_redundancy)
     network = network_env.reset()
+    
     network_env.visualize_network(network, network_env.positions, add_edge_labels=LABEL_EDGES, title="Example Network Visualization")

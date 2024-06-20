@@ -20,6 +20,7 @@ class SpanningTreeEnv(gym.Env):
                        max_nodes, 
                        min_redundancy, 
                        max_redundancy, 
+                       start_difficulty_level=1,
                        final_difficulty_level=10,
                        num_episode_cooldown=400, 
                        min_attacked_nodes=1,
@@ -39,8 +40,7 @@ class SpanningTreeEnv(gym.Env):
         self.max_attacked_nodes = max_attacked_nodes
 
         # Curricula Parameters 
-        self.current_level = 1 # Initial Level
-        self.update_level_parameters() # Initialize environment parameters
+        self.current_level = start_difficulty_level # Initial Level
         self.performance_history = [] # Performance tracking
         self.performance_threshold = 40  # Define a suitable threshold for your task
         self.final_difficulty_level = final_difficulty_level # max difficulty level
@@ -179,12 +179,11 @@ class SpanningTreeEnv(gym.Env):
         size = self.max_difficulty_num_nodes
 
         # Convert the full network and MST to adjacency matrices
-        full_net_matrix = nx.to_numpy_array(self.network, dtype=int)
-        mst_matrix = nx.to_numpy_array(self.tree, dtype=int)
+        full_net_matrix = nx.to_numpy_array(self.network, weight=None, dtype=int) # WEIGHT MUST BE SET TO NONE!
+        mst_matrix = nx.to_numpy_array(self.tree, weight=None, dtype=int)         # WEIGHT MUST BE SET TO NONE!
 
         # Pad the full network matrix
         full_net_matrix_padded = np.zeros((size, size), dtype=int)
-        print(full_net_matrix)
         full_net_matrix_padded[:full_net_matrix.shape[0], :full_net_matrix.shape[1]] = full_net_matrix
 
         # Pad the MST matrix
@@ -266,11 +265,12 @@ class SpanningTreeEnv(gym.Env):
         # Removed connection to attacked node
         disconnected_from_attacked_node = 0
 
-        # Iterate over all possible connections 
+        # Iterate over all possible connections within the current network size 
         index = 0
-        for i in range(self.max_difficulty_num_nodes):
+        # Iterate over only the number of nodes in this current network size
+        for i in range(self.num_nodes):
             # lower triangle not needed in full matrix approach
-            for j in range(i + 1, self.max_difficulty_num_nodes):
+            for j in range(i + 1, self.num_nodes):
                 # Check the action for the edge (i, j)
                 if action[index] == 1 and not self.tree.has_edge(i, j):
                     if self.network.has_edge(i, j):
@@ -328,7 +328,6 @@ class SpanningTreeEnv(gym.Env):
         # else:
         #     reward -= .5  # Penalize if not all attacked nodes are isolated
 
-        reward = 42
         return reward, done
 
     def is_attacked_isolated(self):
@@ -398,11 +397,12 @@ if __name__ == "__main__":
                           max_redundancy=4, 
                           min_attacked_nodes=1, 
                           max_attacked_nodes=2,
+                          start_difficulty_level=1,
                           final_difficulty_level=5,
-                          num_episode_cooldown=10, 
+                          num_episode_cooldown=2, 
                           show_weight_labels=SHOW_WEIGHT_LABELS, 
                           render_mode=True, 
-                          max_ep_steps=5, 
+                          max_ep_steps=10, 
                           node_size=250)
     
     # Reset the environment to start a new episode
@@ -416,8 +416,8 @@ if __name__ == "__main__":
 
         # Execute the action and get the new state, reward, and done flag
         state, reward, done, _, _ = env.step(action)
-        # print(f' Action: \n {action} , Reward {reward}')
-        print(state['full_network'])
+        print(f' Action: \n {action} , Reward {reward}')
+        # print(state['full_network'])
         time.sleep(.5)
         
         # Update the Tkinter window
@@ -425,6 +425,7 @@ if __name__ == "__main__":
 
         if done:
             state = env.reset()
+            done = False
     
     print("Done")
     time.sleep(30)
