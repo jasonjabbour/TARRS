@@ -5,8 +5,11 @@ import time
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, CallbackList
+from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.logger import Logger
 from spanning_tree_env import SpanningTreeEnv
 
+START_DIFFICULTY_LEVEL = 1
 MIN_NODES = 5
 MAX_NODES = 5
 MIN_REDUNDANCY = 3
@@ -16,7 +19,42 @@ RENDER_EVAL_ENV = False
 SHOW_WEIGHT_LABELS = False
 TOTAL_TIMESTEPS = 30000000
 MODEL_DIR_BASE = "./models"
-MODEL_PATH_4_INFERENCE = "./models/model8/best_model/best_model"
+# MODEL_PATH_4_INFERENCE = "./models/model14/best_model/best_model"
+MODEL_PATH_4_INFERENCE = "./models/model14/checkpoints/ppo_spanning_tree_30000000_steps"
+
+class DifficultyLevelLoggingCallback(BaseCallback):
+    def __init__(self, eval_freq, verbose=0):
+        super(DifficultyLevelLoggingCallback, self).__init__(verbose)
+        self.eval_freq = eval_freq  
+    
+    def _on_step(self) -> bool:
+        if self.num_timesteps % self.eval_freq == 0:
+            # Get attributes for env 0 using get_attr with correct indices
+            current_level_env0 = self.training_env.get_attr('current_level', indices=[0])[0]
+            current_level_timesteps_env0 = self.training_env.get_attr('current_level_total_timesteps', indices=[0])[0]
+            performance_env0 = self.training_env.get_attr('get_level_average_performance', indices=[0])[0]
+
+            # Get cumulative data across all environments
+            current_level_list = self.training_env.get_attr('current_level')
+            level_timesteps_list = self.training_env.get_attr('current_level_total_timesteps')
+            level_performance_list = self.training_env.get_attr('get_level_average_performance')
+
+            # Calculate averages and cumulative metrics
+            avg_current_level = sum(current_level_list) / len(current_level_list) if current_level_list else 0
+            cumulative_timesteps = sum(level_timesteps_list)
+            average_performance = sum(level_performance_list) / len(level_performance_list) if level_performance_list else 0
+
+            # Use the built-in logger to output to Tensorboard
+            logger = self.logger if self.logger is not None else Logger.DEFAULT
+            logger.record("Curriculum/average_current_level", avg_current_level)
+            logger.record("Curriculum/cumulative_total_timesteps", cumulative_timesteps)
+            logger.record("Curriculum/avg_performance", average_performance)
+            logger.record("Curriculum/env_0_current_level", current_level_env0)
+            logger.record("Curriculum/env_0_current_level_timesteps", current_level_timesteps_env0)
+            logger.record("Curriculum/env_0_avg_performance", performance_env0)
+            logger.dump(self.num_timesteps)
+        
+        return True
 
 def create_incremental_dir(base_path, prefix="model"):
     """Create a directory with an incrementing index to avoid overwriting previous models."""
@@ -28,12 +66,16 @@ def create_incremental_dir(base_path, prefix="model"):
             return model_dir
         index += 1
 
+
 def train(env, eval_env, total_timesteps, model_dir_base):
     """Train the model."""
     model_dir = create_incremental_dir(model_dir_base)  # Create an incrementally named directory for this training run
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Training on device: {device}")
-    model = PPO("MultiInputPolicy", env, verbose=1, tensorboard_log="./tensorboard_logs/", device=device)
+    model = PPO("MultiInputPolicy", env, verbose=1, tensorboard_log="./tensorboard_logs/", device=device, 
+                learning_rate=0.0003, 
+                clip_range=0.1,
+                batch_size=64)
 
     # Setup checkpoint every set number of steps
     checkpoint_callback = CheckpointCallback(save_freq=100000, save_path=os.path.join(model_dir, 'checkpoints/'), name_prefix='ppo_spanning_tree')
@@ -43,7 +85,10 @@ def train(env, eval_env, total_timesteps, model_dir_base):
                                  log_path=os.path.join(model_dir, 'logs/'), eval_freq=100000,
                                  deterministic=True, render=False)
 
-    callback = CallbackList([checkpoint_callback, eval_callback])
+    # Callback for Logging Difficulty Level
+    difficulty_logging_callback = DifficultyLevelLoggingCallback(eval_freq=100000)
+
+    callback = CallbackList([checkpoint_callback, eval_callback, difficulty_logging_callback])
 
     # Training the model with callbacks
     model.learn(total_timesteps=total_timesteps, callback=callback)
@@ -60,6 +105,7 @@ def test(env, model_path):
     while True:
         action, _states = model.predict(obs, deterministic=True)
         obs, reward, done, info = env.step(action)
+        print(obs['full_network'])
         print(action, reward)
         total_reward += reward
         if done:
@@ -75,13 +121,15 @@ def main():
     env = make_vec_env(lambda: SpanningTreeEnv(min_nodes=MIN_NODES, 
                                                max_nodes=MAX_NODES, 
                                                min_redundancy=MIN_REDUNDANCY, 
-                                               max_redundancy=MAX_REDUNDANCY, 
+                                               max_redundancy=MAX_REDUNDANCY,
+                                               start_difficulty_level=START_DIFFICULTY_LEVEL, 
                                                render_mode=render_mode, 
                                                show_weight_labels=SHOW_WEIGHT_LABELS), 
                                                n_envs=n_envs)
 
     if TRAINING_MODE:
 
+        # TODO FIX TO CHANGE DIFFICULTY LEVELS
         eval_env = make_vec_env(lambda: SpanningTreeEnv(min_nodes=MIN_NODES, 
                                                 max_nodes=MAX_NODES, 
                                                 min_redundancy=MIN_REDUNDANCY, 

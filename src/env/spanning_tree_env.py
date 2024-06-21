@@ -23,14 +23,14 @@ class SpanningTreeEnv(gym.Env):
                        max_redundancy, 
                        start_difficulty_level=1,
                        final_difficulty_level=10,
-                       num_episode_cooldown=400, 
+                       num_timestep_cooldown=100000, 
                        min_attacked_nodes=1,
                        max_attacked_nodes=2,
                        show_weight_labels=False, 
                        render_mode=False, 
                        max_ep_steps=100, 
                        node_size=700, 
-                       reward_history_size=500):
+                       history_size=500):
         super(SpanningTreeEnv, self).__init__()
 
         # Initialize parameters for the network environment
@@ -45,11 +45,16 @@ class SpanningTreeEnv(gym.Env):
         self.current_level = start_difficulty_level # Initial Level
         self.performance_threshold = 40  # Define a suitable threshold for your task
         self.final_difficulty_level = final_difficulty_level # max difficulty level
-        self.num_episode_cooldown = num_episode_cooldown # number of episodes before allowing level increase
+        self.num_timestep_cooldown = num_timestep_cooldown # number of episodes before allowing level increase
         self.num_nodes_history = [] # number of nodes in a network tracking
+        self.history_size = history_size # size of the deque for storing ep cummulative reward
+        self.current_level_total_timesteps = 0
+        
+        # Set the level parameters to start
+        self.update_level_parameters()
 
         # Deque with a fixed size to store reward history
-        self.reward_history = collections.deque(maxlen=history_size)
+        self.reward_history = collections.deque(maxlen=self.history_size)
         # Initialize cumulative reward tracker
         self.ep_cumulative_reward = 0  
 
@@ -115,7 +120,7 @@ class SpanningTreeEnv(gym.Env):
 
     def update_level_parameters(self):
         self.max_nodes = NUM_NODE_INCREASE_RATE_PER_LEVEL * self.current_level
-        self.max_attacked_nodes+= NUM_ATTACKED_NODE_INCREASE_RATE_PER_LEVEL
+        self.max_attacked_nodes = NUM_ATTACKED_NODE_INCREASE_RATE_PER_LEVEL * self.current_level
 
     def should_level_up(self):
 
@@ -124,16 +129,20 @@ class SpanningTreeEnv(gym.Env):
             return False
 
         # Check performance history to decide on leveling up
-        if len(self.reward_history) >= self.num_episode_cooldown:
-            average_performance = sum(self.reward_history) / len(self.reward_history)
+        if self.current_level_total_timesteps >= self.num_timestep_cooldown:
+            average_performance = self.get_level_average_performance()
             return average_performance > self.performance_threshold
         return False
+    
+    @property
+    def get_level_average_performance(self):
+        return sum(self.reward_history) / len(self.reward_history)
 
     def reset(self, seed=None):
 
         # Store last episode's cumulative reward
         self.reward_history.append(self.ep_cumulative_reward)  
-
+       
         # Reset cumulative reward at the start of an episode
         self.ep_cumulative_reward = 0
 
@@ -147,7 +156,9 @@ class SpanningTreeEnv(gym.Env):
             # Update the env characteristics such as min and max nodes
             self.update_level_parameters()
             # Reset reward history
-            self.reward_history = collections.deque(maxlen=history_size) 
+            self.reward_history = collections.deque(maxlen=self.history_size) 
+            # Reset level timestep count
+            self.current_level_total_timesteps = 0 
             print(f"Leveling up! Now at Level {self.current_level}")
             print(f"Max number of nodes at this level: {self.max_nodes}")
             print(f"Average number of nodes in the past level: {sum(self.num_nodes_history)/ len(self.num_nodes_history)}")
@@ -256,6 +267,8 @@ class SpanningTreeEnv(gym.Env):
 
         # Increment timestep
         self.current_step += 1
+        # Increment level timestep
+        self.current_level_total_timesteps +=1
 
         # Render the current state of the environment if required
         if self.render_mode:
@@ -410,9 +423,9 @@ if __name__ == "__main__":
                           max_redundancy=4, 
                           min_attacked_nodes=1, 
                           max_attacked_nodes=2,
-                          start_difficulty_level=1,
+                          start_difficulty_level=3,
                           final_difficulty_level=5,
-                          num_episode_cooldown=2, 
+                          num_timestep_cooldown=2, 
                           show_weight_labels=SHOW_WEIGHT_LABELS, 
                           render_mode=True, 
                           max_ep_steps=10, 
