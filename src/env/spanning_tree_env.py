@@ -6,6 +6,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
 import tkinter as tk
 import time
+import collections
 
 from network_env import NetworkEnvironment
 
@@ -28,7 +29,8 @@ class SpanningTreeEnv(gym.Env):
                        show_weight_labels=False, 
                        render_mode=False, 
                        max_ep_steps=100, 
-                       node_size=700):
+                       node_size=700, 
+                       reward_history_size=500):
         super(SpanningTreeEnv, self).__init__()
 
         # Initialize parameters for the network environment
@@ -41,11 +43,15 @@ class SpanningTreeEnv(gym.Env):
 
         # Curricula Parameters 
         self.current_level = start_difficulty_level # Initial Level
-        self.performance_history = [] # Performance tracking
         self.performance_threshold = 40  # Define a suitable threshold for your task
         self.final_difficulty_level = final_difficulty_level # max difficulty level
         self.num_episode_cooldown = num_episode_cooldown # number of episodes before allowing level increase
         self.num_nodes_history = [] # number of nodes in a network tracking
+
+        # Deque with a fixed size to store reward history
+        self.reward_history = collections.deque(maxlen=history_size)
+        # Initialize cumulative reward tracker
+        self.ep_cumulative_reward = 0  
 
         # Parameter to control weight label rendering
         self.show_weight_labels = show_weight_labels 
@@ -118,12 +124,18 @@ class SpanningTreeEnv(gym.Env):
             return False
 
         # Check performance history to decide on leveling up
-        if len(self.performance_history) >= self.num_episode_cooldown:
-            average_performance = sum(self.performance_history) / len(self.performance_history)
+        if len(self.reward_history) >= self.num_episode_cooldown:
+            average_performance = sum(self.reward_history) / len(self.reward_history)
             return average_performance > self.performance_threshold
         return False
 
     def reset(self, seed=None):
+
+        # Store last episode's cumulative reward
+        self.reward_history.append(self.ep_cumulative_reward)  
+
+        # Reset cumulative reward at the start of an episode
+        self.ep_cumulative_reward = 0
 
         # Set the random seed
         if seed is not None:
@@ -134,7 +146,8 @@ class SpanningTreeEnv(gym.Env):
             self.current_level += 1
             # Update the env characteristics such as min and max nodes
             self.update_level_parameters()
-            self.performance_history = []  # Reset performance history
+            # Reset reward history
+            self.reward_history = collections.deque(maxlen=history_size) 
             print(f"Leveling up! Now at Level {self.current_level}")
             print(f"Max number of nodes at this level: {self.max_nodes}")
             print(f"Average number of nodes in the past level: {sum(self.num_nodes_history)/ len(self.num_nodes_history)}")
@@ -248,9 +261,9 @@ class SpanningTreeEnv(gym.Env):
         if self.render_mode:
             self.render()
             self.root.update()
-        
-        # Store the reward to indicate if difficulty level should increase
-        self.performance_history.append(reward)
+
+        # Keep track of the rewards for this episode
+        self.ep_cumulative_reward += reward
 
         return self.get_state(), reward, done, truncated, {}
 

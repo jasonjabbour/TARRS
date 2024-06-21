@@ -7,11 +7,10 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, CallbackList
 from spanning_tree_env import SpanningTreeEnv
 
-MIN_NODES = 15
-MAX_NODES = 15
+MIN_NODES = 5
+MAX_NODES = 5
 MIN_REDUNDANCY = 3
 MAX_REDUNDANCY = 4
-NUM_ATTACKED_NODES = 1
 TRAINING_MODE = True
 RENDER_EVAL_ENV = False
 SHOW_WEIGHT_LABELS = False
@@ -77,7 +76,6 @@ def main():
                                                max_nodes=MAX_NODES, 
                                                min_redundancy=MIN_REDUNDANCY, 
                                                max_redundancy=MAX_REDUNDANCY, 
-                                               num_attacked_nodes=NUM_ATTACKED_NODES, 
                                                render_mode=render_mode, 
                                                show_weight_labels=SHOW_WEIGHT_LABELS), 
                                                n_envs=n_envs)
@@ -88,7 +86,6 @@ def main():
                                                 max_nodes=MAX_NODES, 
                                                 min_redundancy=MIN_REDUNDANCY, 
                                                 max_redundancy=MAX_REDUNDANCY, 
-                                                num_attacked_nodes=NUM_ATTACKED_NODES, 
                                                 render_mode=RENDER_EVAL_ENV), 
                                                 n_envs=5)
                                                 
