@@ -30,7 +30,8 @@ class SpanningTreeEnv(gym.Env):
                        render_mode=False, 
                        max_ep_steps=100, 
                        node_size=700, 
-                       history_size=500):
+                       history_size=500, 
+                       performance_threshold=40):
         super(SpanningTreeEnv, self).__init__()
 
         # Initialize parameters for the network environment
@@ -43,7 +44,7 @@ class SpanningTreeEnv(gym.Env):
 
         # Curricula Parameters 
         self.current_level = start_difficulty_level # Initial Level
-        self.performance_threshold = 40  # Define a suitable threshold for your task
+        self.performance_threshold = performance_threshold  # Define a suitable threshold for your task
         self.final_difficulty_level = final_difficulty_level # max difficulty level
         self.num_timestep_cooldown = num_timestep_cooldown # number of episodes before allowing level increase
         self.num_nodes_history = [] # number of nodes in a network tracking
@@ -130,7 +131,8 @@ class SpanningTreeEnv(gym.Env):
 
         # Check performance history to decide on leveling up
         if self.current_level_total_timesteps >= self.num_timestep_cooldown:
-            average_performance = self.get_level_average_performance()
+            # Access as a property, not a method call
+            average_performance = self.get_level_average_performance
             return average_performance > self.performance_threshold
         return False
     
@@ -423,13 +425,14 @@ if __name__ == "__main__":
                           max_redundancy=4, 
                           min_attacked_nodes=1, 
                           max_attacked_nodes=2,
-                          start_difficulty_level=3,
+                          start_difficulty_level=1,
                           final_difficulty_level=5,
                           num_timestep_cooldown=2, 
                           show_weight_labels=SHOW_WEIGHT_LABELS, 
                           render_mode=True, 
-                          max_ep_steps=10, 
-                          node_size=250)
+                          max_ep_steps=3, 
+                          node_size=250, 
+                          performance_threshold=-1)
     
     # Reset the environment to start a new episode
     state = env.reset()
