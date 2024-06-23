@@ -138,6 +138,10 @@ class SpanningTreeEnv(gym.Env):
     
     @property
     def get_level_average_performance(self):
+
+        if len(self.reward_history) == 0: 
+            return 0 
+            
         return sum(self.reward_history) / len(self.reward_history)
 
     def reset(self, seed=None):
