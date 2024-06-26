@@ -12,7 +12,7 @@ from network_env import NetworkEnvironment
 
 SHOW_WEIGHT_LABELS = False 
 # Number of nodes that network increases by every difficulty level
-NUM_NODE_INCREASE_RATE_PER_LEVEL = 5
+NUM_NODE_INCREASE_RATE_PER_LEVEL = 1
 # Number of nodes that can be attacked increased by every difficulty level
 NUM_ATTACKED_NODE_INCREASE_RATE_PER_LEVEL = 1
 
@@ -23,7 +23,7 @@ class SpanningTreeEnv(gym.Env):
                        max_redundancy, 
                        start_difficulty_level=1,
                        final_difficulty_level=10,
-                       num_timestep_cooldown=100000, 
+                       num_timestep_cooldown=10000, 
                        min_attacked_nodes=1,
                        max_attacked_nodes=2,
                        show_weight_labels=False, 
@@ -31,7 +31,7 @@ class SpanningTreeEnv(gym.Env):
                        max_ep_steps=100, 
                        node_size=700, 
                        history_size=500, 
-                       performance_threshold=40):
+                       performance_threshold=30):
         super(SpanningTreeEnv, self).__init__()
 
         # Initialize parameters for the network environment
@@ -78,7 +78,7 @@ class SpanningTreeEnv(gym.Env):
         self.tree = None
        
         # Initialize placeholders for the number of nodes, action space, and observation space
-        self.max_difficulty_num_nodes = NUM_NODE_INCREASE_RATE_PER_LEVEL *  self.final_difficulty_level
+        self.max_difficulty_num_nodes = 4 + NUM_NODE_INCREASE_RATE_PER_LEVEL *  self.final_difficulty_level
 
         # Define action space as adjacency matrix
         # Since the action is symmetric, only define the upper triangular part
@@ -88,8 +88,11 @@ class SpanningTreeEnv(gym.Env):
         # number of possible edges in an undirected graph without self-loops
         self.max_difficulty_max_num_edges = int(self.max_difficulty_num_nodes * (self.max_difficulty_num_nodes - 1) / 2) 
 
-        # Flat array representing only the upper triangle of the adjacency matrix.
+        # Flat array representing only the upper triangle of the adjacency matrix. (FOR PPO)
         self.action_space = spaces.MultiBinary(self.max_difficulty_max_num_edges)
+
+        # Define a continuous action space where each action can range from 0 to 1 (FOR SAC)
+        # self.action_space = gym.spaces.Box(low=0.0, high=1.0, shape=(self.max_difficulty_max_num_edges,), dtype=np.float32)
 
         # Define the observation space 
         # TODO currently observation space is max number of nodes. Explore embedding to an equal dimension.
@@ -120,8 +123,8 @@ class SpanningTreeEnv(gym.Env):
         self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
 
     def update_level_parameters(self):
-        self.max_nodes = NUM_NODE_INCREASE_RATE_PER_LEVEL * self.current_level
-        self.max_attacked_nodes = NUM_ATTACKED_NODE_INCREASE_RATE_PER_LEVEL * self.current_level
+        self.max_nodes = 4 + NUM_NODE_INCREASE_RATE_PER_LEVEL * self.current_level
+        self.max_attacked_nodes = 1 + NUM_ATTACKED_NODE_INCREASE_RATE_PER_LEVEL * (self.current_level // 5)
 
     def should_level_up(self):
 
@@ -255,7 +258,15 @@ class SpanningTreeEnv(gym.Env):
         
         return action_mask
 
-    def step(self, action):    
+    def process_actions(self, continuous_actions, threshold=0.5):
+        # Convert continuous actions into binary decisions
+        binary_actions = (continuous_actions > threshold).astype(int)
+        return binary_actions
+
+    def step(self, action):   
+
+        # Convert continuous actions to binary decisions
+        # action = self.process_actions(action) 
 
         # Execute the action
         valid_action, invalid_action, connected_to_attacked_node, disconnected_from_attacked_node = self.execute_action(action)

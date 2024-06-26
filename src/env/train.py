@@ -3,13 +3,15 @@ import gymnasium as gym
 import torch
 import time
 from stable_baselines3 import PPO
+from stable_baselines3 import SAC
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, CallbackList
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.logger import Logger
 from spanning_tree_env import SpanningTreeEnv
 
-START_DIFFICULTY_LEVEL = 1
+START_DIFFICULTY_LEVEL = 21
+FINAL_DIFFICULTY_LEVEL = 21
 MIN_NODES = 5
 MAX_NODES = 5
 MIN_REDUNDANCY = 3
@@ -19,8 +21,9 @@ RENDER_EVAL_ENV = False
 SHOW_WEIGHT_LABELS = False
 TOTAL_TIMESTEPS = 30000000
 MODEL_DIR_BASE = "./models"
+ALGO = 'PPO'
 # MODEL_PATH_4_INFERENCE = "./models/model14/best_model/best_model"
-MODEL_PATH_4_INFERENCE = "./models/model14/checkpoints/ppo_spanning_tree_30000000_steps"
+MODEL_PATH_4_INFERENCE = f"./models/model17/checkpoints/{ALGO.lower()}_spanning_tree_30000000_steps"
 
 class DifficultyLevelLoggingCallback(BaseCallback):
     def __init__(self, eval_freq, verbose=0):
@@ -72,10 +75,24 @@ def train(env, eval_env, total_timesteps, model_dir_base):
     model_dir = create_incremental_dir(model_dir_base)  # Create an incrementally named directory for this training run
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Training on device: {device}")
-    model = PPO("MultiInputPolicy", env, verbose=1, tensorboard_log="./tensorboard_logs/", device=device, 
-                learning_rate=0.0003, 
-                clip_range=0.1,
-                batch_size=64)
+
+    if ALGO == 'PPO':
+        model = PPO("MultiInputPolicy", env, verbose=1, tensorboard_log="./tensorboard_logs/", device=device, 
+                    learning_rate=0.0003, 
+                    clip_range=0.1,
+                    batch_size=64)
+    elif ALGO == 'SAC':
+        model = SAC("MultiInputPolicy", env, verbose=1, tensorboard_log="./tensorboard_logs/", device=device,
+            learning_rate=0.0003, 
+            batch_size=64, 
+            buffer_size=100000, 
+            ent_coef='auto', 
+            train_freq=(32, 'step'),  # Train after 64 steps
+            gradient_steps=64,  # Number of gradient steps after collecting new samples
+            use_sde=True, 
+            sde_sample_freq=4, 
+            target_update_interval=1)
+
 
     # Setup checkpoint every set number of steps
     checkpoint_callback = CheckpointCallback(save_freq=100000, save_path=os.path.join(model_dir, 'checkpoints/'), name_prefix='ppo_spanning_tree')
@@ -92,14 +109,19 @@ def train(env, eval_env, total_timesteps, model_dir_base):
 
     # Training the model with callbacks
     model.learn(total_timesteps=total_timesteps, callback=callback)
-    model.save(os.path.join(model_dir, "ppo_spanning_tree_final"))  # Saving final model state after training
+    model.save(os.path.join(model_dir, f"{ALGO.lower()}_spanning_tree_final"))  # Saving final model state after training
     return model
 
 def test(env, model_path):
     """Test the model with visualization."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Testing on device: {device}")
-    model = PPO.load(model_path, env=env, device=device)
+
+    if ALGO == 'PPO':
+        model = PPO.load(model_path, env=env, device=device)
+    elif ALGO == 'SAC':
+        model = SAC.load(model_path, env=env, device=device)
+
     obs = env.reset()
     total_reward = 0
     while True:
@@ -123,6 +145,7 @@ def main():
                                                min_redundancy=MIN_REDUNDANCY, 
                                                max_redundancy=MAX_REDUNDANCY,
                                                start_difficulty_level=START_DIFFICULTY_LEVEL, 
+                                               final_difficulty_level=FINAL_DIFFICULTY_LEVEL,
                                                render_mode=render_mode, 
                                                show_weight_labels=SHOW_WEIGHT_LABELS), 
                                                n_envs=n_envs)
@@ -134,6 +157,8 @@ def main():
                                                 max_nodes=MAX_NODES, 
                                                 min_redundancy=MIN_REDUNDANCY, 
                                                 max_redundancy=MAX_REDUNDANCY, 
+                                                start_difficulty_level=START_DIFFICULTY_LEVEL, 
+                                                final_difficulty_level=FINAL_DIFFICULTY_LEVEL,
                                                 render_mode=RENDER_EVAL_ENV), 
                                                 n_envs=5)
                                                 
