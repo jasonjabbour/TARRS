@@ -1,8 +1,9 @@
 import simpy
 import random
 import tkinter as tk
-from viewer import Viewer
-from packet import Packet
+
+from safe_ptp.src.ptp.viewer import Viewer
+from safe_ptp.src.ptp.packet import Packet
 
 
 class Clock:

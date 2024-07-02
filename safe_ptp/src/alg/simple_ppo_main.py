@@ -1,6 +1,6 @@
 import gymnasium as gym 
 import numpy as np 
-from simple_ppo import Agent
+from safe_ptp.alg.simple_ppo import Agent
 import matplotlib.pyplot as plt
 
 def plot_learning_curve(x, score_history):

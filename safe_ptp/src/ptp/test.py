@@ -1,9 +1,9 @@
 import simpy
 import random
 import tkinter as tk
-from viewer import Viewer
-from bmca import BMCA
-from ptp import Clock, NetworkSwitch
+from safe_ptp.src.ptp.viewer import Viewer
+from safe_ptp.src.ptp.bmca import BMCA
+from safe_ptp.src.ptp.ptp import Clock, NetworkSwitch
 
 clock_num = 2
 

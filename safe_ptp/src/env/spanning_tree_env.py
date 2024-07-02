@@ -8,7 +8,7 @@ import tkinter as tk
 import time
 import collections
 
-from network_env import NetworkEnvironment
+from safe_ptp.src.env.network_env import NetworkEnvironment
 
 SHOW_WEIGHT_LABELS = False 
 # Number of nodes that network increases by every difficulty level

@@ -2,13 +2,15 @@ import os
 import gymnasium as gym
 import torch
 import time
+
 from stable_baselines3 import PPO
 from stable_baselines3 import SAC
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, CallbackList
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.logger import Logger
-from spanning_tree_env import SpanningTreeEnv
+
+from safe_ptp.src.env.spanning_tree_env import SpanningTreeEnv
 
 START_DIFFICULTY_LEVEL = 21
 FINAL_DIFFICULTY_LEVEL = 21

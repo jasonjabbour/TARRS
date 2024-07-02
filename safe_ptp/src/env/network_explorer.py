@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import networkx as nx
-from network_env import NetworkEnvironment
+from safe_ptp.src.env.network_env import NetworkEnvironment
 
 MIN_REDUNDANCY = 2
 MAX_REDUNDANCY = 4
