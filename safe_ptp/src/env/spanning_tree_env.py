@@ -100,7 +100,7 @@ class SpanningTreeEnv(gym.Env):
             "full_network": spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.int32),
             "mst": spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.int32),
             "weights": spaces.Box(low=0, high=10, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.int32),
-            "attacked": spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.int32),
+            "attacked": spaces.MultiBinary(self.max_difficulty_num_nodes),
             "action_mask": spaces.MultiBinary(self.max_difficulty_max_num_edges)
         })
 
@@ -229,12 +229,9 @@ class SpanningTreeEnv(gym.Env):
         weights_matrix_padded[:weights_matrix.shape[0], :weights_matrix.shape[1]] = weights_matrix
 
         # Create an adjacency matrix where attacked nodes are marked
-        attacked_matrix = np.zeros((size, size), dtype=int)
+        attacked_vector = np.zeros(size, dtype=int)
         for node in self.attacked_nodes:
-            # Mark entire row to indicate this node is attacked
-            attacked_matrix[node, :] = 1  
-            # Mark entire column to indicate this node is attacked
-            attacked_matrix[:, node] = 1  
+            attacked_vector[node] = 1
 
         # Get action mask
         action_mask = self.get_action_mask()
@@ -244,7 +241,7 @@ class SpanningTreeEnv(gym.Env):
             "full_network": full_net_matrix_padded,
             "mst": mst_matrix_padded,
             "weights": weights_matrix_padded,
-            "attacked": attacked_matrix,
+            "attacked": attacked_vector,
             "action_mask": action_mask,
         }
 
