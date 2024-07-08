@@ -10,8 +10,3 @@ Once you are in the Devcontainer run the following:
 cd safe_ptp
 pip install -e .
 ```
-
-## TODO
-Requirements to add to Docker:
-
-pip install torch_geometric

@@ -45,5 +45,13 @@
 		"-v", "/tmp/.X11-unix:/tmp/.X11-unix", 
 		"--device=/dev/input/js0", 
 		"--network=host"
-	]
+	], 
+
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python" // Python extension
+            ]
+        }
+    }
 }

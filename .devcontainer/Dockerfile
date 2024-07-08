@@ -18,13 +18,16 @@ RUN apt-get update && apt-get install -y \
 RUN python3 -m pip install --upgrade pip
 
 # Install required Python modules
-RUN pip install matplotlib stable-baselines3 gymnasium networkx simpy 
+RUN pip install matplotlib stable-baselines3 gymnasium networkx simpy torch_geometric
 
-# Install TensorFlow, ensure you get a version that matches your Python setup
-RUN pip install tensorflow==2.15.0 tensorflow-probability==0.19.0
+RUN pip install tensorboard
 
-# Install TF Agents stable version
-RUN pip install tf-agents
+# IF USING TFAGENTS: 
+# # Install TensorFlow, ensure you get a version that matches your Python setup
+# RUN pip install tensorflow==2.15.0 tensorflow-probability==0.19.0
+
+# # Install TF Agents stable version
+# RUN pip install tf-agents
 
 # Define the default working directory where your source code is located
 WORKDIR /tmp/safe_ptp/src/safe_ptp

@@ -99,7 +99,7 @@ class SpanningTreeEnv(gym.Env):
         self.observation_space = spaces.Dict({
             "full_network": spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.int32),
             "mst": spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.int32),
-            "weights": spaces.Box(low=0, high=10, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.int32),
+            "weights": spaces.Box(low=0, high=10, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.float32),
             "attacked": spaces.MultiBinary(self.max_difficulty_num_nodes),
             "action_mask": spaces.MultiBinary(self.max_difficulty_max_num_edges)
         })
