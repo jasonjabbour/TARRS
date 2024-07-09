@@ -19,21 +19,14 @@ class GNNFeatureExtractor(BaseFeaturesExtractor):
         node_feature_dim = 1
         self.gcn_full = gnn.GCNConv(node_feature_dim, features_dim // 2).to(self.device)
         self.gcn_mst = gnn.GCNConv(node_feature_dim, features_dim // 2).to(self.device)
-        self.count = 0 
 
     def forward(self, observations):
-        self.count+=1
 
-        # print(self.count)
         # Extract relevant matrices and vectors
         full_network = observations['full_network'][0].to(self.device)
         mst_status = observations['mst'][0].to(self.device)
         attacked_status = observations['attacked'][0].to(self.device)
         weights = observations['weights'][0].to(self.device)
-        
-        # print("WEIGHTS!!!")
-        # print(weights)
-        # print(weights.shape)
 
         # Creating edge indices from adjacency matrices
         edge_index_full = (full_network > 0).nonzero(as_tuple=False).t().contiguous()
@@ -42,35 +35,8 @@ class GNNFeatureExtractor(BaseFeaturesExtractor):
         edge_index_mst = (mst_status > 0).nonzero(as_tuple=False).t().contiguous()
         edge_weights_mst = weights[mst_status > 0].clone().detach().float()
 
-        # print("Full Network")
-        # print(full_network)
-        # print(full_network.shape)
-        # print("MST Status")
-        # print(mst_status)
-        # print(mst_status.shape)
-        # print("Attacked Status")
-        # print(attacked_status)
-        # print(attacked_status.shape)
-        # print("Edge Index FUll")
-        # print(edge_index_full)
-        # print(edge_index_full.shape)
-        # print("Edge Index MST")
-        # print(edge_index_mst)
-        # print(edge_index_mst.shape)
-
-        # print("Edge weights full")
-        # print(edge_weights_full)
-        # print(edge_weights_full.shape)
-
-        # print("Edge weights mst")
-        # print(edge_weights_mst)
-        # print(edge_weights_mst.shape)
-
         # Prepare node features: here we use only the attacked status as node features for simplicity
         node_features = attacked_status.unsqueeze(-1).float()  # Assuming attacked_status is a [N,] vector
-
-        # print("Node Features", node_features)
-        # print(node_features.shape)
 
         # Passing node features, edge indices, and edge weights to GCN layers
         x_full = self.gcn_full(node_features, edge_index_full, edge_weights_full)
@@ -164,9 +130,6 @@ class CustomGNNActorCriticPolicy(ActorCriticPolicy):
         # Get the critic value
         values = self.critic(features)
 
-        # print(type(actions))
-        # print(type(values))
-        # print(type(log_probs))
         return actions, values, log_probs
 
     def evaluate_actions(self, obs, actions):
