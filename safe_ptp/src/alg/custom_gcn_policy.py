@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from torch.optim import Adam
 from torch.distributions import Bernoulli
 import torch.nn.functional as F
 import torch_geometric.nn as gnn
@@ -90,39 +91,61 @@ class GNNFeatureExtractor(BaseFeaturesExtractor):
 
 class CustomGNNActorCriticPolicy(ActorCriticPolicy):
     def __init__(self, observation_space, action_space, lr_schedule, features_dim=256, **kwargs):
+        # Call the super constructor first
         super(CustomGNNActorCriticPolicy, self).__init__(
-            observation_space,
-            action_space,
-            lr_schedule,
-            net_arch=None,
+            observation_space, action_space, lr_schedule,
+            features_extractor_class=GNNFeatureExtractor,
+            features_extractor_kwargs={'features_dim': features_dim},
             **kwargs
         )
-        self.features_extractor = GNNFeatureExtractor(observation_space, features_dim).to(self.device)
-        
-        # Define the actor and critic networks using the extracted features
+
+        # Get the device dynamically based on CUDA availability
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Initialize actor and critic networks
         self.actor = nn.Sequential(
             nn.Linear(features_dim, action_space.n),
             nn.Sigmoid()
-        ).to(self.device)
+        ).to(device)
+        
         self.critic = nn.Sequential(
             nn.Linear(features_dim, 1)
-        ).to(self.device)
+        ).to(device)
 
+        # Assign to action_net and value_net which are used by the base class
+        self.action_net = self.actor
+        self.value_net = self.critic
+
+        # Setup the optimizer
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=lr_schedule(1))
+
+    def _build(self, lr_schedule):
+        # This method intentionally does nothing to prevent the base class from building its own networks
+        pass
+
+    def predict_values(self, obs):
+        """
+        Get the estimated values according to the current policy given the observations.
+
+        :param obs: Observation
+        :return: the estimated values.
+        """
+        features = self.features_extractor(obs)
+        return self.value_net(features)
+    
     def forward(self, obs, deterministic=False):
-
         assert all(key in obs for key in ['full_network', 'mst', 'attacked', 'weights']), "Missing keys in observations"
-        # Ensure all entries are tensors or compatible with tensor operations
-        for key, value in obs.items():
-            assert torch.is_tensor(value), f"Non-tensor data found in observations for key {key}"
 
+        # Ensuring all entries are tensors and are on the correct device
+        device = next(self.features_extractor.parameters()).device  # Get the device from the parameters of the features extractor
 
         # Check and convert inputs
         if isinstance(obs, tuple):
             # If the observation is a tuple, unpack it as needed
-            obs = obs[0]  
+            obs = obs[0]
 
-        # Ensure that each item in the observation dictionary is converted to a tensor
-        obs_tensors = {k: v.to(self.device) if torch.is_tensor(v) else torch.tensor(v, dtype=torch.float32).to(self.device) for k, v in obs.items()}
+        # Ensure that each item in the observation dictionary is converted to a tensor and moved to the correct device
+        obs_tensors = {k: v.to(device) if torch.is_tensor(v) else torch.tensor(v, dtype=torch.float32).to(device) for k, v in obs.items()}
 
         # Extract features using the custom feature extractor
         features = self.features_extractor(obs_tensors)  # Directly use the feature extractor here
@@ -146,7 +169,25 @@ class CustomGNNActorCriticPolicy(ActorCriticPolicy):
         # print(type(log_probs))
         return actions, values, log_probs
 
+    def evaluate_actions(self, obs, actions):
+        # Extract features using the GNN features extractor
+        features = self.features_extractor(obs)
 
+        # Compute the policy's output (latent_pi) and the value function's output (latent_vf)
+        latent_pi = self.actor(features)
+        latent_vf = self.critic(features)
+
+        # Create a distribution for calculating log probabilities and entropy
+        dist = torch.distributions.Bernoulli(logits=latent_pi)
+
+        # Calculate log probabilities of the taken actions and entropy
+        log_prob = dist.log_prob(actions).sum(dim=1, keepdim=True)
+        entropy = dist.entropy().sum(dim=1, keepdim=True)
+
+        # The critic's output is the estimated value of the state
+        values = latent_vf
+
+        return values, log_prob, entropy
 
 
 
