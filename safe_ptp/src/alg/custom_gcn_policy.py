@@ -152,6 +152,20 @@ class CustomGNNActorCriticPolicy(ActorCriticPolicy):
 
         return values, log_prob, entropy
 
+    def get_distribution(self, obs):
+        """Get the action distribution based on the policy network's output."""
+        features = self.extract_features(obs)  # Extract features from observations
+        action_probs = self.actor(features)  # Get action probabilities
+        return torch.distributions.Bernoulli(probs=action_probs)  # Return Bernoulli distribution based on the probabilities
 
+    def _predict(self, obs, deterministic=False):
+        """Predict actions based on the policy distribution and whether to use deterministic actions."""
+        distribution = self.get_distribution(obs)
+        if deterministic:
+            # Deterministic actions: choose action based on probability threshold
+            return (distribution.probs >= 0.5).float()
+        else:
+            # Stochastic actions: sample from the Bernoulli distribution
+            return distribution.sample()
 
 

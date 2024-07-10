@@ -182,7 +182,7 @@ class SpanningTreeEnv(gym.Env):
         # Reset the network environment and get the initial network
         self.network = self.network_env.reset()
 
-         # Retrieve positions after reset
+        # Retrieve positions after reset
         self.pos = self.network_env.get_positions(self.network) 
 
         # Clear the previous spanning tree if it exists
@@ -357,7 +357,7 @@ class SpanningTreeEnv(gym.Env):
         # Check if all attacked nodes are isolated
         all_isolated = self.is_attacked_isolated()
         if all_isolated:
-            # reward += .5  # Reward for isolating attacked nodes
+            reward += .5  # Reward for isolating attacked nodes
             non_attacked_subgraph = self.tree.subgraph([n for n in self.tree.nodes if n not in self.attacked_nodes])
             if nx.is_connected(non_attacked_subgraph) and nx.is_tree(non_attacked_subgraph):
                 current_weight = sum(data['weight'] for u, v, data in non_attacked_subgraph.edges(data=True))
