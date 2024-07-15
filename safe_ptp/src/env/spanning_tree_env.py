@@ -23,7 +23,7 @@ class SpanningTreeEnv(gym.Env):
                        max_redundancy, 
                        start_difficulty_level=1,
                        final_difficulty_level=10,
-                       num_timestep_cooldown=10000, 
+                       num_timestep_cooldown=250000, 
                        min_attacked_nodes=1,
                        max_attacked_nodes=2,
                        show_weight_labels=False, 
@@ -31,7 +31,7 @@ class SpanningTreeEnv(gym.Env):
                        max_ep_steps=100, 
                        node_size=700, 
                        history_size=500, 
-                       performance_threshold=30):
+                       performance_threshold=4):
         super(SpanningTreeEnv, self).__init__()
 
         # Initialize parameters for the network environment
@@ -80,28 +80,67 @@ class SpanningTreeEnv(gym.Env):
         # Initialize placeholders for the number of nodes, action space, and observation space
         self.max_difficulty_num_nodes = 4 + NUM_NODE_INCREASE_RATE_PER_LEVEL *  self.final_difficulty_level
 
-        # Define action space as adjacency matrix
-        # Since the action is symmetric, only define the upper triangular part
-        # We only define the full matrix here, but ensure actions are taken on the upper triangular part through the environment logic
-        # self.action_space = spaces.MultiBinary(self.max_nodes * self.max_nodes)
-
         # number of possible edges in an undirected graph without self-loops
         self.max_difficulty_max_num_edges = int(self.max_difficulty_num_nodes * (self.max_difficulty_num_nodes - 1) / 2) 
 
-        # Flat array representing only the upper triangle of the adjacency matrix. (FOR PPO)
-        self.action_space = spaces.MultiBinary(self.max_difficulty_max_num_edges)
+        # # Flat array representing only the upper triangle of the adjacency matrix. (FOR PPO)
+        # self.action_space = spaces.MultiBinary(self.max_difficulty_max_num_edges)
 
         # Define a continuous action space where each action can range from 0 to 1 (FOR SAC)
         # self.action_space = gym.spaces.Box(low=0.0, high=1.0, shape=(self.max_difficulty_max_num_edges,), dtype=np.float32)
 
-        # Define the observation space 
-        # TODO currently observation space is max number of nodes. Explore embedding to an equal dimension.
+        # # Define the observation space 
+        # # TODO currently observation space is max number of nodes. Explore embedding to an equal dimension.
+        # self.observation_space = spaces.Dict({
+        #     "physical_network": spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.int32),
+        #     "spanning_tree": spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.int32),
+        #     "weights": spaces.Box(low=0, high=10, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.float32),
+        #     "attacked": spaces.MultiBinary(self.max_difficulty_num_nodes),
+        #     # "action_mask": spaces.MultiBinary(self.max_difficulty_max_num_edges)
+        # })
+
+        # Define the action space
+        self.action_space = spaces.MultiDiscrete([
+            2,  # 0 = remove, 1 = add
+            self.max_difficulty_num_nodes,  # index for node1
+            self.max_difficulty_num_nodes   # index for node2
+        ])
+
+        # Create low and high arrays with the same shape as the node features
+        low = np.zeros((self.max_difficulty_num_nodes, 2), dtype=np.int32)  
+        high = np.zeros((self.max_difficulty_num_nodes, 2), dtype=np.int32)  ## Low values for both features High values for both features
+
+        # Set the range for each feature
+        # First feature (attacked status) ranges from 0 to 1
+        high[:, 0] = 1  # Maximum value for the attacked status
+        # Second feature (node index) ranges from 0 to max_difficulty_num_nodes - 1
+        high[:, 1] = self.max_difficulty_num_nodes - 1  # Maximum value for node index
+
+        # Define the space with correct low and high arrays
+        node_features_space = spaces.Box(low=low, high=high, dtype=np.int32)
+
+        # Physical Edge Indices List
+        physical_edge_indices_space = spaces.Box(low=0, high=self.max_difficulty_num_nodes-1, shape=(self.max_difficulty_max_num_edges, 2), dtype=np.int32)
+        # Physical edge weights, assuming weight value max of 1000
+        physical_edge_weights_space = spaces.Box(low=0, high=1000, shape=(self.max_difficulty_max_num_edges, 1), dtype=np.float32)
+
+        # Spanning Tree Edge Indices List
+        spanning_tree_edge_indices_space = spaces.Box(low=0, high=self.max_difficulty_num_nodes-1, shape=(self.max_difficulty_max_num_edges, 2), dtype=np.int32)
+        # Spanning Tree Edge weights, assuming weight value max of 1000
+        spanning_tree_edge_weights_space = spaces.Box(low=0, high=1000, shape=(self.max_difficulty_max_num_edges, 1), dtype=np.float32)
+        
+        # Edge masks to indicate real or padded edges
+        physical_edge_mask_space = spaces.Box(low=0, high=1, shape=(self.max_difficulty_max_num_edges, 1), dtype=np.uint8)
+        spanning_tree_edge_mask_space = spaces.Box(low=0, high=1, shape=(self.max_difficulty_max_num_edges, 1), dtype=np.uint8)
+
         self.observation_space = spaces.Dict({
-            "full_network": spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.int32),
-            "mst": spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.int32),
-            "weights": spaces.Box(low=0, high=10, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.float32),
-            "attacked": spaces.MultiBinary(self.max_difficulty_num_nodes),
-            "action_mask": spaces.MultiBinary(self.max_difficulty_max_num_edges)
+            "node_features": node_features_space,
+            "physical_edge_indices": physical_edge_indices_space,
+            "physical_edge_weights": physical_edge_weights_space,
+            "physical_edge_mask": physical_edge_mask_space,
+            "spanning_tree_edge_indices": spanning_tree_edge_indices_space,
+            "spanning_tree_edge_weights": spanning_tree_edge_weights_space,
+            "spanning_tree_edge_mask": spanning_tree_edge_mask_space
         })
 
         # Initialize placeholder for node positions
@@ -110,17 +149,18 @@ class SpanningTreeEnv(gym.Env):
         # Set of nodes that are attacked
         self.attacked_nodes = set()  
 
-        # Set up the Tkinter root window
-        self.root = tk.Tk()
-        self.root.wm_title("Spanning Tree Environment")
-        
-        # Set up Matplotlib figure and axes
-        self.fig, self.ax = plt.subplots(1, 3, figsize=(14, 6))
-        
-        # Embed the Matplotlib figure in the Tkinter canvas
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self.root)
-        self.canvas.draw()
-        self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+        if render_mode: 
+            # Set up the Tkinter root window
+            self.root = tk.Tk()
+            self.root.wm_title("Spanning Tree Environment")
+            
+            # Set up Matplotlib figure and axes
+            self.fig, self.ax = plt.subplots(1, 3, figsize=(14, 6))
+            
+            # Embed the Matplotlib figure in the Tkinter canvas
+            self.canvas = FigureCanvasTkAgg(self.fig, master=self.root)
+            self.canvas.draw()
+            self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
 
     def update_level_parameters(self):
         self.max_nodes = 4 + NUM_NODE_INCREASE_RATE_PER_LEVEL * self.current_level
@@ -207,43 +247,61 @@ class SpanningTreeEnv(gym.Env):
         return self.get_state(), {}
 
     def get_state(self):
-
-        # Function to pad matrices to the maximum node size
+        '''
+        Attention! 
+            If you ever try to get the adj. matrix:
+            nx.to_numpy_array(self.network, weight=None, dtype=int) 
+            WEIGHT MUST BE SET TO NONE!
+        '''
         size = self.max_difficulty_num_nodes
+        max_edges = self.max_difficulty_max_num_edges
 
-        # Convert the full network and MST to adjacency matrices
-        full_net_matrix = nx.to_numpy_array(self.network, weight=None, dtype=int) # WEIGHT MUST BE SET TO NONE!
-        mst_matrix = nx.to_numpy_array(self.tree, weight=None, dtype=int)         # WEIGHT MUST BE SET TO NONE!
-
-        # Pad the full network matrix
-        full_net_matrix_padded = np.zeros((size, size), dtype=int)
-        full_net_matrix_padded[:full_net_matrix.shape[0], :full_net_matrix.shape[1]] = full_net_matrix
-
-        # Pad the MST matrix
-        mst_matrix_padded = np.zeros((size, size), dtype=int)
-        mst_matrix_padded[:mst_matrix.shape[0], :mst_matrix.shape[1]] = mst_matrix
-
-        # Extract edge weights from the full network and pad it
-        weights_matrix = nx.to_numpy_array(self.network, weight='weight')
-        weights_matrix_padded = np.zeros((size, size), dtype=float)
-        weights_matrix_padded[:weights_matrix.shape[0], :weights_matrix.shape[1]] = weights_matrix
-
-        # Create an adjacency matrix where attacked nodes are marked
-        attacked_vector = np.zeros(size, dtype=int)
+        # Node features: Attacked status (0 or 1) and node index
+        node_features = np.zeros((size, 2), dtype=np.int32)  
+        # Set the first feature for attacked nodes
         for node in self.attacked_nodes:
-            attacked_vector[node] = 1
+            node_features[node, 0] = 1  
+        # Set the second feature as the node index
+        for node in range(size):
+            node_features[node, 1] = node  
 
-        # Get action mask
-        action_mask = self.get_action_mask()
+        # Prepare padded arrays for edge indices, weights, and masks
+        physical_network_edges_indices = np.zeros((max_edges, 2), dtype=np.int32)
+        physical_network_weights = np.zeros((max_edges, 1), dtype=np.float32)
+        physical_edge_mask = np.zeros((max_edges, 1), dtype=np.uint8)
 
-        # Complete State: Ensure all parts are padded to the maximum size
+        spanning_tree_edges_indices = np.zeros((max_edges, 2), dtype=np.int32)
+        spanning_tree_weights = np.zeros((max_edges, 1), dtype=np.float32)
+        spanning_tree_edge_mask = np.zeros((max_edges, 1), dtype=np.uint8)
+
+        # Fill actual data for physical network 
+        actual_physical_edges = np.array([[u, v] for u, v in self.network.edges()], dtype=np.int32)
+        actual_physical_weights = np.array([[self.network.edges[u, v]['weight']] for u, v in self.network.edges()], dtype=np.float32)
+        physical_network_edges_indices[:actual_physical_edges.shape[0]] = actual_physical_edges
+        physical_network_weights[:actual_physical_edges.shape[0]] = actual_physical_weights
+
+        # Add a mask for the physical network
+        physical_edge_mask[:actual_physical_edges.shape[0], 0] = 1  
+
+        # Fill actual data for the spanning tree
+        actual_spanning_tree_edges = np.array([[u, v] for u, v in self.tree.edges()], dtype=np.int32)
+        actual_spanning_tree_weights = np.array([[self.tree.edges[u, v]['weight']] for u, v in self.tree.edges()], dtype=np.float32)
+        spanning_tree_edges_indices[:actual_spanning_tree_edges.shape[0]] = actual_spanning_tree_edges
+        spanning_tree_weights[:actual_spanning_tree_edges.shape[0]] = actual_spanning_tree_weights
+
+        # Add mask for the spanning tree
+        spanning_tree_edge_mask[:actual_spanning_tree_edges.shape[0], 0] = 1 
+
         return {
-            "full_network": full_net_matrix_padded,
-            "mst": mst_matrix_padded,
-            "weights": weights_matrix_padded,
-            "attacked": attacked_vector,
-            "action_mask": action_mask,
+            "node_features": node_features,
+            "physical_edge_indices": physical_network_edges_indices,
+            "physical_edge_weights": physical_network_weights,
+            "physical_edge_mask": physical_edge_mask,
+            "spanning_tree_edge_indices": spanning_tree_edges_indices,
+            "spanning_tree_edge_weights": spanning_tree_weights,
+            "spanning_tree_edge_mask": spanning_tree_edge_mask
         }
+
 
     def get_action_mask(self):
         
@@ -295,38 +353,44 @@ class SpanningTreeEnv(gym.Env):
         return self.get_state(), reward, done, truncated, {}
 
     def execute_action(self, action):
+        # Unpack the action tuple
+        action_type, node1, node2 = action[0], action[1], action[2] 
 
-        # Could be adding edge or removing edge
         valid_action = 0
-        # Adding edge when physical network doesn't have edge
         invalid_action = 0
-        # Added a connection to attacked node
-        connected_to_attacked_node = 0 
-        # Removed connection to attacked node
+        connected_to_attacked_node = 0
         disconnected_from_attacked_node = 0
 
-        # Iterate over all possible connections within the current network size 
-        index = 0
-        # Iterate over only the number of nodes in this current network size
-        for i in range(self.num_nodes):
-            # lower triangle not needed in full matrix approach
-            for j in range(i + 1, self.num_nodes):
-                # Check the action for the edge (i, j)
-                if action[index] == 1 and not self.tree.has_edge(i, j):
-                    if self.network.has_edge(i, j):
-                        self.tree.add_edge(i, j, weight=self.network[i][j]['weight'])
+        # Ensure the nodes are within the current graph's bounds and node1 is not the same as node2
+        if node1 < self.num_nodes and node2 < self.num_nodes and node1 != node2:
+            # Action to add an edge
+            if action_type == 1:  
+                # Check if the edge does not already exist
+                if not self.tree.has_edge(node1, node2):  
+                    # Check if it's a valid edge in the physical network
+                    if self.network.has_edge(node1, node2):  
+                        # Add edge in the "spanning tree"
+                        self.tree.add_edge(node1, node2, weight=self.network[node1][node2]['weight'])
                         valid_action += 1
+                        # Check if either of the nodes are attacked nodes
+                        if self.is_connection_to_attacked_node(node1, node2):
+                            connected_to_attacked_node += 1
                     else:
-                        invalid_action += 1
-
-                    if i in self.attacked_nodes or j in self.attacked_nodes:
-                        connected_to_attacked_node += 1
-
-                elif action[index] == 0 and self.tree.has_edge(i, j):
-                    self.tree.remove_edge(i, j)
-                    if i in self.attacked_nodes or j in self.attacked_nodes:
+                        # Trying to add a non-existent edge in the physical network
+                        invalid_action += 1 
+            # Action to remove an edge 
+            elif action_type == 0:  
+                # Check if the edge exists
+                if self.tree.has_edge(node1, node2):  
+                    self.tree.remove_edge(node1, node2)
+                    valid_action += 1
+                    # Check if either of the nodes are attacked nodes
+                    if self.is_connection_to_attacked_node(node1, node2):
                         disconnected_from_attacked_node += 1
-                index += 1
+                else:
+                    invalid_action += 1  # Trying to remove a non-existent edge in the tree
+        else:
+            invalid_action += 1  # Invalid node indices
 
         return valid_action, invalid_action, connected_to_attacked_node, disconnected_from_attacked_node
 
@@ -335,40 +399,36 @@ class SpanningTreeEnv(gym.Env):
         return node1 in self.attacked_nodes or node2 in self.attacked_nodes
 
     def calculate_reward(self, valid_action, invalid_action, connected_to_attacked_node, disconnected_from_attacked_node):
-        
-        reward = -.1
+        reward = -0.5  # Adjusted base penalty per step to discourage delay
         done = False
 
-        # # Terminate episode if invalid action is taken
-        # if invalid_action >= 1:
-        #     done = True 
-        #     reward = -10
-        #     return reward, done
+        # Penalties for actions
+        reward -= 5 * invalid_action  # Higher penalty for invalid actions
+        reward -= 1 * connected_to_attacked_node  # Penalty for connecting to attacked nodes
 
-        # # Apply penalties and rewards for actions related to attacked nodes
-        # reward -= 1 * connected_to_attacked_node
-        # reward += .5 * disconnected_from_attacked_node
+        # Rewards for intermediate actions
+        reward += 0.2 * disconnected_from_attacked_node  # Reduced reward for disconnecting attacked nodes
 
-        # # Check for connections to attacked nodes and penalize for each existing connection
-        # for node in self.attacked_nodes:
-        #     for neighbor in self.tree.neighbors(node):
-        #         reward -= 0.5  # Penalize for each connection to an attacked node
-
-        # Check if all attacked nodes are isolated
         all_isolated = self.is_attacked_isolated()
+
         if all_isolated:
-            reward += .5  # Reward for isolating attacked nodes
+            # Intermediate reward for isolating all attacked nodes, but less significant
+            reward += 5
+
             non_attacked_subgraph = self.tree.subgraph([n for n in self.tree.nodes if n not in self.attacked_nodes])
-            if nx.is_connected(non_attacked_subgraph) and nx.is_tree(non_attacked_subgraph):
-                current_weight = sum(data['weight'] for u, v, data in non_attacked_subgraph.edges(data=True))
-                reward += 50 - current_weight/100  # Encourage lighter tree
-                done = True  # End the episode if a valid MST is formed
-        #     else:
-        #         reward -= .5  # Penalize if the subgraph is not a valid MST
-        # else:
-        #     reward -= .5  # Penalize if not all attacked nodes are isolated
+            if nx.is_tree(non_attacked_subgraph) and nx.is_connected(non_attacked_subgraph):
+                tree_weight = sum(data['weight'] for u, v, data in non_attacked_subgraph.edges(data=True))
+                # Major reward for completing the main objective
+                reward += 50 - 0.1 * tree_weight  # Adjust weight penalty to be less impactful
+                reward += 0.5 * (self.max_ep_steps - self.current_step)  # Stronger bonus for early completion
+                done = True
+            else:
+                reward -= 2  # Incremental penalty for not yet completing the tree
+        else:
+            reward -= 2  # Penalty if not all attacked nodes are isolated
 
         return reward, done
+
 
     def is_attacked_isolated(self):
         # Check each attacked node to see if it is completely isolated
@@ -431,18 +491,18 @@ class SpanningTreeEnv(gym.Env):
 # Example usage
 if __name__ == "__main__":
     # Create the SpanningTreeEnv environment
-    env = SpanningTreeEnv(min_nodes=5, 
-                          max_nodes=5, 
+    env = SpanningTreeEnv(min_nodes=20, 
+                          max_nodes=20, 
                           min_redundancy=3, 
                           max_redundancy=4, 
                           min_attacked_nodes=1, 
                           max_attacked_nodes=2,
-                          start_difficulty_level=1,
-                          final_difficulty_level=5,
+                          start_difficulty_level=16,
+                          final_difficulty_level=16,
                           num_timestep_cooldown=2, 
                           show_weight_labels=SHOW_WEIGHT_LABELS, 
                           render_mode=True, 
-                          max_ep_steps=3, 
+                          max_ep_steps=100, 
                           node_size=250, 
                           performance_threshold=-1)
     
@@ -458,8 +518,8 @@ if __name__ == "__main__":
         # Execute the action and get the new state, reward, and done flag
         state, reward, done, _, _ = env.step(action)
         print(f' Action: \n {action} , Reward {reward}')
-        # print(state['full_network'])
-        time.sleep(.5)
+
+        time.sleep(.1)
         
         # Update the Tkinter window
         env.root.update()
@@ -473,3 +533,78 @@ if __name__ == "__main__":
 
     # Close the environment
     env.close()
+
+
+
+# # Function to pad matrices to the maximum node size
+# size = self.max_difficulty_num_nodes
+
+# # Convert the full network and MST to adjacency matrices
+# full_net_matrix = nx.to_numpy_array(self.network, weight=None, dtype=int) # WEIGHT MUST BE SET TO NONE!
+# mst_matrix = nx.to_numpy_array(self.tree, weight=None, dtype=int)         # WEIGHT MUST BE SET TO NONE!
+
+# # Pad the full network matrix
+# full_net_matrix_padded = np.zeros((size, size), dtype=int)
+# full_net_matrix_padded[:full_net_matrix.shape[0], :full_net_matrix.shape[1]] = full_net_matrix
+
+# # Pad the MST matrix
+# mst_matrix_padded = np.zeros((size, size), dtype=int)
+# mst_matrix_padded[:mst_matrix.shape[0], :mst_matrix.shape[1]] = mst_matrix
+
+# # Extract edge weights from the full network and pad it
+# weights_matrix = nx.to_numpy_array(self.network, weight='weight')
+# weights_matrix_padded = np.zeros((size, size), dtype=float)
+# weights_matrix_padded[:weights_matrix.shape[0], :weights_matrix.shape[1]] = weights_matrix
+
+# # Create an adjacency matrix where attacked nodes are marked
+# attacked_vector = np.zeros(size, dtype=int)
+# for node in self.attacked_nodes:
+#     attacked_vector[node] = 1
+
+# # Get action mask
+# action_mask = self.get_action_mask()
+
+# # Complete State: Ensure all parts are padded to the maximum size
+# return {
+#     "full_network": full_net_matrix_padded,
+#     "mst": mst_matrix_padded,
+#     "weights": weights_matrix_padded,
+#     "attacked": attacked_vector,
+#     "action_mask": action_mask,
+# }
+
+#  def execute_action(self, action):
+
+#         # Could be adding edge or removing edge
+#         valid_action = 0
+#         # Adding edge when physical network doesn't have edge
+#         invalid_action = 0
+#         # Added a connection to attacked node
+#         connected_to_attacked_node = 0 
+#         # Removed connection to attacked node
+#         disconnected_from_attacked_node = 0
+
+#         # Iterate over all possible connections within the current network size 
+#         index = 0
+#         # Iterate over only the number of nodes in this current network size
+#         for i in range(self.num_nodes):
+#             # lower triangle not needed in full matrix approach
+#             for j in range(i + 1, self.num_nodes):
+#                 # Check the action for the edge (i, j)
+#                 if action[index] == 1 and not self.tree.has_edge(i, j):
+#                     if self.network.has_edge(i, j):
+#                         self.tree.add_edge(i, j, weight=self.network[i][j]['weight'])
+#                         valid_action += 1
+#                     else:
+#                         invalid_action += 1
+
+#                     if i in self.attacked_nodes or j in self.attacked_nodes:
+#                         connected_to_attacked_node += 1
+
+#                 elif action[index] == 0 and self.tree.has_edge(i, j):
+#                     self.tree.remove_edge(i, j)
+#                     if i in self.attacked_nodes or j in self.attacked_nodes:
+#                         disconnected_from_attacked_node += 1
+#                 index += 1
+
+#         return valid_action, invalid_action, connected_to_attacked_node, disconnected_from_attacked_node

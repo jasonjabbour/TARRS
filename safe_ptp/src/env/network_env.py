@@ -75,8 +75,8 @@ class NetworkEnvironment:
 
 if __name__ == '__main__':
 
-    min_nodes = 5
-    max_nodes = 30
+    min_nodes = 20
+    max_nodes = 20
     min_redundancy = 3
     max_redundancy = 5
 
