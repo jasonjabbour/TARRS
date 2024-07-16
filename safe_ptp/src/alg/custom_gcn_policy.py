@@ -155,48 +155,48 @@ class CustomGNNActorCriticPolicy(ActorCriticPolicy):
         # Action dimensions based on the action space (assumes MultiDiscrete space)
         action_dims = action_space.nvec.tolist()
 
-        # Constructing the actor network.
-        # It needs to handle different actions for each part of the MultiDiscrete space.
-        # We use ModuleList to handle each discrete action dimension separately.
-        self.actor_modules = nn.ModuleList()
-        for dim in action_dims:
-            # Each dimension of the action space has its own linear layer followed by softmax
-            # This outputs a probability distribution over possible actions for each part.
-            action_module = nn.Sequential(
-                nn.Linear(features_dim, dim),
-                nn.Softmax(dim=-1)
-            )
-            self.actor_modules.append(action_module.to(device))
-
-        # Constructing the critic network.
-        # It outputs a single value representing the state value estimate.
-        self.critic = nn.Sequential(
-            nn.Linear(features_dim, 1)
-        ).to(device)
-
-        # # Constructing a more complex actor network.
+        # # Constructing the actor network.
+        # # It needs to handle different actions for each part of the MultiDiscrete space.
+        # # We use ModuleList to handle each discrete action dimension separately.
         # self.actor_modules = nn.ModuleList()
         # for dim in action_dims:
-        #     # Adding more layers with nonlinearities and possibly dropout for regularization.
+        #     # Each dimension of the action space has its own linear layer followed by softmax
+        #     # This outputs a probability distribution over possible actions for each part.
         #     action_module = nn.Sequential(
-        #         nn.Linear(features_dim, features_dim * 2),
-        #         nn.ReLU(),
-        #         nn.Dropout(p=0.2),  # Dropout for regularization
-        #         nn.Linear(features_dim * 2, features_dim),  # Additional intermediate layer
-        #         nn.ReLU(),
         #         nn.Linear(features_dim, dim),
         #         nn.Softmax(dim=-1)
         #     )
         #     self.actor_modules.append(action_module.to(device))
 
-        # # Constructing a more complex critic network.
+        # # Constructing the critic network.
+        # # It outputs a single value representing the state value estimate.
         # self.critic = nn.Sequential(
-        #     nn.Linear(features_dim, features_dim * 2),
-        #     nn.ReLU(),
-        #     nn.Linear(features_dim * 2, features_dim),
-        #     nn.ReLU(),
         #     nn.Linear(features_dim, 1)
         # ).to(device)
+
+        # Constructing a more complex actor network.
+        self.actor_modules = nn.ModuleList()
+        for dim in action_dims:
+            # Adding more layers with nonlinearities and possibly dropout for regularization.
+            action_module = nn.Sequential(
+                nn.Linear(features_dim, features_dim * 2),
+                nn.ReLU(),
+                nn.Dropout(p=0.2),  # Dropout for regularization
+                nn.Linear(features_dim * 2, features_dim),  # Additional intermediate layer
+                nn.ReLU(),
+                nn.Linear(features_dim, dim),
+                nn.Softmax(dim=-1)
+            )
+            self.actor_modules.append(action_module.to(device))
+
+        # Constructing a more complex critic network.
+        self.critic = nn.Sequential(
+            nn.Linear(features_dim, features_dim * 2),
+            nn.ReLU(),
+            nn.Linear(features_dim * 2, features_dim),
+            nn.ReLU(),
+            nn.Linear(features_dim, 1)
+        ).to(device)
 
         # Assigning the actor network list to action_net, used by the base class.
         self.action_net = self.actor_modules
