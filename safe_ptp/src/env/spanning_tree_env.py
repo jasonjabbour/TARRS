@@ -283,14 +283,16 @@ class SpanningTreeEnv(gym.Env):
         # Add a mask for the physical network
         physical_edge_mask[:actual_physical_edges.shape[0], 0] = 1  
 
-        # Fill actual data for the spanning tree
-        actual_spanning_tree_edges = np.array([[u, v] for u, v in self.tree.edges()], dtype=np.int32)
-        actual_spanning_tree_weights = np.array([[self.tree.edges[u, v]['weight']] for u, v in self.tree.edges()], dtype=np.float32)
-        spanning_tree_edges_indices[:actual_spanning_tree_edges.shape[0]] = actual_spanning_tree_edges
-        spanning_tree_weights[:actual_spanning_tree_edges.shape[0]] = actual_spanning_tree_weights
+        # Fill actual data for the spanning tree, if available
+        if self.tree.number_of_edges() > 0:
+            # Fill actual data for the spanning tree
+            actual_spanning_tree_edges = np.array([[u, v] for u, v in self.tree.edges()], dtype=np.int32)
+            actual_spanning_tree_weights = np.array([[self.tree.edges[u, v]['weight']] for u, v in self.tree.edges()], dtype=np.float32)
+            spanning_tree_edges_indices[:actual_spanning_tree_edges.shape[0]] = actual_spanning_tree_edges
+            spanning_tree_weights[:actual_spanning_tree_edges.shape[0]] = actual_spanning_tree_weights
 
-        # Add mask for the spanning tree
-        spanning_tree_edge_mask[:actual_spanning_tree_edges.shape[0], 0] = 1 
+            # Add mask for the spanning tree
+            spanning_tree_edge_mask[:actual_spanning_tree_edges.shape[0], 0] = 1 
 
         return {
             "node_features": node_features,
@@ -399,33 +401,34 @@ class SpanningTreeEnv(gym.Env):
         return node1 in self.attacked_nodes or node2 in self.attacked_nodes
 
     def calculate_reward(self, valid_action, invalid_action, connected_to_attacked_node, disconnected_from_attacked_node):
-        reward = -0.5  # Adjusted base penalty per step to discourage delay
+        
+        reward = 0  
         done = False
 
-        # Penalties for actions
-        reward -= 5 * invalid_action  # Higher penalty for invalid actions
-        reward -= 1 * connected_to_attacked_node  # Penalty for connecting to attacked nodes
+        # Penalty for connecting to attacked nodes
+        reward -= .1 * connected_to_attacked_node  
 
-        # Rewards for intermediate actions
-        reward += 0.2 * disconnected_from_attacked_node  # Reduced reward for disconnecting attacked nodes
+        # Reduced reward for disconnecting attacked nodes
+        reward += 0.05 * disconnected_from_attacked_node  
 
         all_isolated = self.is_attacked_isolated()
 
         if all_isolated:
-            # Intermediate reward for isolating all attacked nodes, but less significant
-            reward += 5
 
             non_attacked_subgraph = self.tree.subgraph([n for n in self.tree.nodes if n not in self.attacked_nodes])
             if nx.is_tree(non_attacked_subgraph) and nx.is_connected(non_attacked_subgraph):
                 tree_weight = sum(data['weight'] for u, v, data in non_attacked_subgraph.edges(data=True))
                 # Major reward for completing the main objective
-                reward += 50 - 0.1 * tree_weight  # Adjust weight penalty to be less impactful
-                reward += 0.5 * (self.max_ep_steps - self.current_step)  # Stronger bonus for early completion
+                reward += 50 - 0.1 * tree_weight  
+                # Stronger bonus for early completion
+                reward += 0.5 * (self.max_ep_steps - self.current_step)  
                 done = True
             else:
-                reward -= 2  # Incremental penalty for not yet completing the tree
+                # Incremental penalty for not yet completing the tree
+                reward -= 1  
         else:
-            reward -= 2  # Penalty if not all attacked nodes are isolated
+            # Penalty if not all attacked nodes are isolated
+            reward -= 1  
 
         return reward, done
 
