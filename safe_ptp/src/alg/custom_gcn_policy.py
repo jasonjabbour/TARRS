@@ -295,12 +295,13 @@ class CustomGNNActorCriticPolicy(ActorCriticPolicy):
         logits = self.actor(features).view(-1, self.num_nodes, self.num_nodes)
         masked_logits = torch.where(action_mask.bool(), logits, torch.tensor(float('-inf')).to(self._device))
         
-        # Apply softmax to get probabilities
-        probabilities = F.softmax(masked_logits, dim=-1)
+        # Apply softmax to convert masked logits into probabilities, flattening the matrix to a vector
+        probabilities = F.softmax(masked_logits.flatten(1), dim=-1)
         
-        # Create a categorical distribution from these probabilities
-        distribution = torch.distributions.Categorical(probabilities.view(-1, self.num_nodes * self.num_nodes))
+        # Create a categorical distribution from the flattened probabilities
+        distribution = torch.distributions.Categorical(probabilities)
         return distribution
+
 
     def _predict(self, obs, deterministic=False):
         """Predict actions based on the policy distribution and whether to use deterministic actions."""
