@@ -304,21 +304,20 @@ class CustomGNNActorCriticPolicy(ActorCriticPolicy):
 
     def _predict(self, obs, deterministic=False):
         """Predict actions based on the policy distribution and whether to use deterministic actions."""
-        
-        # Ensure the distribution is computed on the right device
-        distribution = self.get_distribution(obs).to(self._device)
-        
+
+        # Compute the distribution using the prepared observations
+        distribution = self.get_distribution(obs)
+
         if deterministic:
             # If deterministic, choose the action with the highest probability
             action_indices = torch.argmax(distribution.probs, dim=1)
         else:
             # Otherwise, sample from the distribution
             action_indices = distribution.sample()
-        
+
         # Convert flat indices to matrix indices
         action_pairs = (action_indices // self.num_nodes, action_indices % self.num_nodes)
-        return torch.stack(action_pairs, dim=1).to(self._device)  # Ensure that the output tensor is also on the correct device
-
+        return torch.stack(action_pairs, dim=1)
 
     # def _predict(self, obs, deterministic=False):
     #     """Predict actions based on the policy distribution and whether to use deterministic actions."""
