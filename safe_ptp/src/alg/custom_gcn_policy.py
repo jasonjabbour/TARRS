@@ -16,9 +16,15 @@ class GNNFeatureExtractor(BaseFeaturesExtractor):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Define the number of features each node has
-        node_feature_dim = 1  # Includes attacked status
-        self.gcn_full = gnn.GCNConv(node_feature_dim, features_dim).to(self.device)
-        # self.gcn_mst = gnn.GCNConv(node_feature_dim, features_dim // 2).to(self.device)
+        # node_feature_dim = 1  # Includes attacked status
+
+        # Regular Features
+        node_feature_dim = observation_space['node_features'].shape[1]
+        # Get number of nodes for one-hot encoding addition
+        num_nodes = observation_space['node_features'].shape[0]
+
+        self.gcn_full = gnn.GCNConv(node_feature_dim + num_nodes, features_dim // 2).to(self.device)
+        self.gcn_mst = gnn.GCNConv(node_feature_dim + num_nodes, features_dim // 2).to(self.device)
 
     # def forward(self, observations):
     #     # Removing the batch dimension by squeezing if it is of size 1
@@ -78,9 +84,9 @@ class GNNFeatureExtractor(BaseFeaturesExtractor):
         physical_edge_weights = observations['physical_edge_weights'].to(self.device).float()
         physical_edge_mask = observations['physical_edge_mask'].to(self.device).bool()
 
-        # spanning_edge_indices = observations['spanning_tree_edge_indices'].to(self.device).long()
-        # spanning_edge_weights = observations['spanning_tree_edge_weights'].to(self.device).float()
-        # spanning_edge_mask = observations['spanning_tree_edge_mask'].to(self.device).bool()
+        spanning_edge_indices = observations['spanning_tree_edge_indices'].to(self.device).long()
+        spanning_edge_weights = observations['spanning_tree_edge_weights'].to(self.device).float()
+        spanning_edge_mask = observations['spanning_tree_edge_mask'].to(self.device).bool()
 
         features_list = []
 
@@ -88,51 +94,57 @@ class GNNFeatureExtractor(BaseFeaturesExtractor):
             nf = node_features[idx]  # Node features for one graph instance
             num_nodes = nf.size(0)
 
+            # One-hot encoding for node indices
+            one_hot_indices = torch.eye(num_nodes, device=self.device)
+
+            # Concatenate original node features with one-hot encoded indices and degrees
+            nf = torch.cat([nf, one_hot_indices], dim=1)
+
             # Physical Network Processing
             pei = physical_edge_indices[idx]
             pew = physical_edge_weights[idx]
             pem = physical_edge_mask[idx].squeeze(-1)
 
-            # # Spanning Tree Network Processing
-            # sei = spanning_edge_indices[idx]
-            # sew = spanning_edge_weights[idx]
-            # sem = spanning_edge_mask[idx].squeeze(-1)
+            # Spanning Tree Network Processing
+            sei = spanning_edge_indices[idx]
+            sew = spanning_edge_weights[idx]
+            sem = spanning_edge_mask[idx].squeeze(-1)
 
             # Apply mask to physical network
             valid_physical_indices = pei[pem]
             valid_physical_weights = pew[pem]
 
-            # # Apply mask to spanning network
-            # valid_spanning_indices = sei[sem]
-            # valid_spanning_weights = sew[sem]
+            # Apply mask to spanning network
+            valid_spanning_indices = sei[sem]
+            valid_spanning_weights = sew[sem]
 
             # Transpose indices to shape [2, E]
             valid_physical_indices = valid_physical_indices.t()
-            # valid_spanning_indices = valid_spanning_indices.t()
+            valid_spanning_indices = valid_spanning_indices.t()
 
             # Add self loops to gather node specific features
             valid_physical_indices, valid_physical_weights = add_self_loops(
                 valid_physical_indices, valid_physical_weights, fill_value=1.0, num_nodes=num_nodes)
 
-            # # Add self loops to gather node specific features
-            # valid_spanning_indices, valid_spanning_weights = add_self_loops(
-            #     valid_spanning_indices, valid_spanning_weights, fill_value=1.0, num_nodes=num_nodes)
+            # Add self loops to gather node specific features
+            valid_spanning_indices, valid_spanning_weights = add_self_loops(
+                valid_spanning_indices, valid_spanning_weights, fill_value=1.0, num_nodes=num_nodes)
 
             # GCN Layer
             x_full = self.gcn_full(nf, valid_physical_indices, valid_physical_weights)
-            # x_mst = self.gcn_mst(nf, valid_spanning_indices, valid_spanning_weights)
+            x_mst = self.gcn_mst(nf, valid_spanning_indices, valid_spanning_weights)
 
             # GCN Activation
             x_full = F.relu(x_full)
-            # x_mst = F.relu(x_mst)
+            x_mst = F.relu(x_mst)
 
             # GCN Aggregator
             x_full_pooled = gnn.global_mean_pool(x_full, batch=torch.zeros(num_nodes, dtype=torch.long, device=self.device))
-            # x_mst_pooled = gnn.global_mean_pool(x_mst, batch=torch.zeros(num_nodes, dtype=torch.long, device=self.device))
+            x_mst_pooled = gnn.global_mean_pool(x_mst, batch=torch.zeros(num_nodes, dtype=torch.long, device=self.device))
 
             # Combine features from both GCN outputs
-            # combined_features = torch.cat([x_full_pooled, x_mst_pooled], dim=-1)
-            features_list.append(x_full_pooled)
+            combined_features = torch.cat([x_full_pooled, x_mst_pooled], dim=-1)
+            features_list.append(combined_features)
 
         # Concatenate pooled features from all graphs in the batch
         final_combined_features = torch.cat(features_list, dim=0)

@@ -136,14 +136,14 @@ class SpanningTreeEnv(gym.Env):
         # Physical edge weights, assuming weight value max of 100
         physical_edge_weights_space = spaces.Box(low=0, high=100, shape=(self.max_difficulty_max_num_edges, 1), dtype=np.float32)
 
-        # # Spanning Tree Edge Indices List
-        # spanning_tree_edge_indices_space = spaces.Box(low=0, high=self.max_difficulty_num_nodes-1, shape=(self.max_difficulty_max_num_edges, 2), dtype=np.int32)
-        # # Spanning Tree Edge weights, assuming weight value max of 100
-        # spanning_tree_edge_weights_space = spaces.Box(low=0, high=100, shape=(self.max_difficulty_max_num_edges, 1), dtype=np.float32)
+        # Spanning Tree Edge Indices List
+        spanning_tree_edge_indices_space = spaces.Box(low=0, high=self.max_difficulty_num_nodes-1, shape=(self.max_difficulty_max_num_edges, 2), dtype=np.int32)
+        # Spanning Tree Edge weights, assuming weight value max of 100
+        spanning_tree_edge_weights_space = spaces.Box(low=0, high=100, shape=(self.max_difficulty_max_num_edges, 1), dtype=np.float32)
         
         # Edge masks to indicate real or padded edges
         physical_edge_mask_space = spaces.Box(low=0, high=1, shape=(self.max_difficulty_max_num_edges, 1), dtype=np.uint8)
-        # spanning_tree_edge_mask_space = spaces.Box(low=0, high=1, shape=(self.max_difficulty_max_num_edges, 1), dtype=np.uint8)
+        spanning_tree_edge_mask_space = spaces.Box(low=0, high=1, shape=(self.max_difficulty_max_num_edges, 1), dtype=np.uint8)
 
         # Mask to communicate what actions are allowed to be taken
         valid_action_mask = spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.uint8)
@@ -153,9 +153,9 @@ class SpanningTreeEnv(gym.Env):
             "physical_edge_indices": physical_edge_indices_space,
             "physical_edge_weights": physical_edge_weights_space,
             "physical_edge_mask": physical_edge_mask_space,
-            # "spanning_tree_edge_indices": spanning_tree_edge_indices_space,
-            # "spanning_tree_edge_weights": spanning_tree_edge_weights_space,
-            # "spanning_tree_edge_mask": spanning_tree_edge_mask_space
+            "spanning_tree_edge_indices": spanning_tree_edge_indices_space,
+            "spanning_tree_edge_weights": spanning_tree_edge_weights_space,
+            "spanning_tree_edge_mask": spanning_tree_edge_mask_space,
             "action_mask": valid_action_mask, 
         })
 
@@ -293,9 +293,9 @@ class SpanningTreeEnv(gym.Env):
         physical_network_weights = np.zeros((max_edges, 1), dtype=np.float32)
         physical_edge_mask = np.zeros((max_edges, 1), dtype=np.uint8)
 
-        # spanning_tree_edges_indices = np.zeros((max_edges, 2), dtype=np.int32)
-        # spanning_tree_weights = np.zeros((max_edges, 1), dtype=np.float32)
-        # spanning_tree_edge_mask = np.zeros((max_edges, 1), dtype=np.uint8)
+        spanning_tree_edges_indices = np.zeros((max_edges, 2), dtype=np.int32)
+        spanning_tree_weights = np.zeros((max_edges, 1), dtype=np.float32)
+        spanning_tree_edge_mask = np.zeros((max_edges, 1), dtype=np.uint8)
 
         # Fill actual data for physical network 
         actual_physical_edges = np.array([[u, v] for u, v in self.network.edges()], dtype=np.int32)
@@ -306,25 +306,25 @@ class SpanningTreeEnv(gym.Env):
         # Add a mask for the physical network
         physical_edge_mask[:actual_physical_edges.shape[0], 0] = 1  
 
-        # # Fill actual data for the spanning tree, if available
-        # if self.tree.number_of_edges() > 0:
-        #     # Fill actual data for the spanning tree
-        #     actual_spanning_tree_edges = np.array([[u, v] for u, v in self.tree.edges()], dtype=np.int32)
-        #     actual_spanning_tree_weights = np.array([[self.tree.edges[u, v]['weight']] for u, v in self.tree.edges()], dtype=np.float32)
-        #     spanning_tree_edges_indices[:actual_spanning_tree_edges.shape[0]] = actual_spanning_tree_edges
-        #     spanning_tree_weights[:actual_spanning_tree_edges.shape[0]] = actual_spanning_tree_weights
+        # Fill actual data for the spanning tree, if available
+        if self.tree.number_of_edges() > 0:
+            # Fill actual data for the spanning tree
+            actual_spanning_tree_edges = np.array([[u, v] for u, v in self.tree.edges()], dtype=np.int32)
+            actual_spanning_tree_weights = np.array([[self.tree.edges[u, v]['weight']] for u, v in self.tree.edges()], dtype=np.float32)
+            spanning_tree_edges_indices[:actual_spanning_tree_edges.shape[0]] = actual_spanning_tree_edges
+            spanning_tree_weights[:actual_spanning_tree_edges.shape[0]] = actual_spanning_tree_weights
 
-        #     # Add mask for the spanning tree
-        #     spanning_tree_edge_mask[:actual_spanning_tree_edges.shape[0], 0] = 1 
+            # Add mask for the spanning tree
+            spanning_tree_edge_mask[:actual_spanning_tree_edges.shape[0], 0] = 1 
 
         return {
             "node_features": node_features,
             "physical_edge_indices": physical_network_edges_indices,
             "physical_edge_weights": physical_network_weights,
             "physical_edge_mask": physical_edge_mask,
-            # "spanning_tree_edge_indices": spanning_tree_edges_indices,
-            # "spanning_tree_edge_weights": spanning_tree_weights,
-            # "spanning_tree_edge_mask": spanning_tree_edge_mask
+            "spanning_tree_edge_indices": spanning_tree_edges_indices,
+            "spanning_tree_edge_weights": spanning_tree_weights,
+            "spanning_tree_edge_mask": spanning_tree_edge_mask,
             "action_mask": self.action_mask, 
         }
 
@@ -334,9 +334,9 @@ class SpanningTreeEnv(gym.Env):
              # Only upper triangle needed for undirected graph
             for j in range(i + 1, num_nodes): 
                 if network.has_edge(i, j):
+                    # Upper triangle and symmetry entry stays 0
                     mask[i][j] = 1
-                    # Symmetric entry
-                    mask[j][i] = 1  
+
         return mask
 
     def update_action_mask(self, network, mask, node1, node2, action):
