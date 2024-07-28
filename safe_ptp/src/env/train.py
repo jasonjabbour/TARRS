@@ -14,11 +14,11 @@ from safe_ptp.src.env.spanning_tree_env import SpanningTreeEnv
 from safe_ptp.src.alg.custom_gcn_policy import CustomGNNActorCriticPolicy
 
 
-START_DIFFICULTY_LEVEL = 5
-FINAL_DIFFICULTY_LEVEL = 5
-MIN_NODES = 1
-MAX_NODES = 1
-MIN_REDUNDANCY = 3
+START_DIFFICULTY_LEVEL = 1
+FINAL_DIFFICULTY_LEVEL = 1
+MIN_NODES = 5
+MAX_NODES = 5
+MIN_REDUNDANCY = 2
 MAX_REDUNDANCY = 4
 TRAINING_MODE = True
 RENDER_EVAL_ENV = False

@@ -26,57 +26,6 @@ class GNNFeatureExtractor(BaseFeaturesExtractor):
         self.gcn_full = gnn.GCNConv(node_feature_dim + num_nodes, features_dim // 2).to(self.device)
         self.gcn_mst = gnn.GCNConv(node_feature_dim + num_nodes, features_dim // 2).to(self.device)
 
-    # def forward(self, observations):
-    #     # Removing the batch dimension by squeezing if it is of size 1
-    #     node_features = observations['node_features'].squeeze(0).to(self.device).float()
-    #     physical_edge_indices = observations['physical_edge_indices'].squeeze(0).to(self.device).long()
-    #     physical_edge_weights = observations['physical_edge_weights'].squeeze(0).to(self.device).float()
-    #     physical_edge_mask = observations['physical_edge_mask'].squeeze(0).to(self.device).bool()
-
-    #     spanning_edge_indices = observations['spanning_tree_edge_indices'].squeeze(0).to(self.device).long()
-    #     spanning_edge_weights = observations['spanning_tree_edge_weights'].squeeze(0).to(self.device).float()
-    #     spanning_edge_mask = observations['spanning_tree_edge_mask'].squeeze(0).to(self.device).bool()
-
-    #     # Apply Mask
-    #     valid_physical_mask = physical_edge_mask.squeeze()
-    #     valid_spanning_mask = spanning_edge_mask.squeeze()
-
-    #     # Filter indices and weights using the boolean masks
-    #     valid_physical_indices = physical_edge_indices[valid_physical_mask]
-    #     valid_physical_weights = physical_edge_weights[valid_physical_mask]
-
-    #     valid_spanning_indices = spanning_edge_indices[valid_spanning_mask]
-    #     valid_spanning_weights = spanning_edge_weights[valid_spanning_mask]
-
-    #     # Add self-loops
-    #     num_nodes = node_features.size(0)
-
-    #     # Transpose indices to shape [2, E]
-    #     valid_physical_indices = valid_physical_indices.t()
-    #     valid_spanning_indices = valid_spanning_indices.t()
-
-    #     valid_physical_indices, valid_physical_weights = add_self_loops(
-    #         valid_physical_indices, valid_physical_weights, fill_value=1.0, num_nodes=num_nodes)
-    #     valid_spanning_indices, valid_spanning_weights = add_self_loops(
-    #         valid_spanning_indices, valid_spanning_weights, fill_value=1.0, num_nodes=num_nodes)
-
-    #     # Forward pass through GCNs for both the physical network and the spanning tree
-    #     x_full = self.gcn_full(node_features, valid_physical_indices, valid_physical_weights)
-    #     x_mst = self.gcn_mst(node_features, valid_spanning_indices, valid_spanning_weights)
-
-    #     # Apply ReLU activation function
-    #     x_full = F.relu(x_full)
-    #     x_mst = F.relu(x_mst)
-
-    #     # Global mean pooling to aggregate features
-    #     x_full_pooled = gnn.global_mean_pool(x_full, batch=torch.zeros(x_full.size(0), dtype=torch.long, device=self.device))
-    #     x_mst_pooled = gnn.global_mean_pool(x_mst, batch=torch.zeros(x_mst.size(0), dtype=torch.long, device=self.device))
-
-    #     # Concatenate pooled features from both networks
-    #     combined_features = torch.cat([x_full_pooled, x_mst_pooled], dim=-1)
-
-    #     return combined_features
-
     def forward(self, observations):
         # Keep batch dimensions intact, move to device and cast types
         node_features = observations['node_features'].to(self.device).float()
@@ -331,40 +280,3 @@ class CustomGNNActorCriticPolicy(ActorCriticPolicy):
         # Convert flat indices to matrix indices
         action_pairs = (action_indices // self.num_nodes, action_indices % self.num_nodes)
         return torch.stack(action_pairs, dim=1)
-
-    # def _predict(self, obs, deterministic=False):
-    #     """Predict actions based on the policy distribution and whether to use deterministic actions."""
-    #     # Get the distributions for each action part
-    #     distributions = self.get_distribution(obs)
-    #     if deterministic:
-    #         # If deterministic, choose the action with the highest probability
-    #         actions = [torch.argmax(d.probs, dim=1) for d in distributions]
-    #     else:
-    #         # Otherwise, sample from the distribution
-    #         actions = [d.sample() for d in distributions]
-    #     # Stack the actions from all parts into a single tensor
-    #     actions = torch.cat(actions, dim=0)
-    #     return actions
-
-
-
-# # Initialize lists to store actions and their log probabilities for each part of the action space
-# actions = []
-# action_log_probs = []
-
-# # Obtain action probabilities from the current module
-# action_probs = actor_module(features)
-# # Create a categorical distribution based on the action probabilities
-# dist = torch.distributions.Categorical(action_probs)
-# # Sample or select the maximum probability action depending on whether deterministic is set
-# action = dist.sample() if not deterministic else torch.argmax(action_probs, dim=1, keepdim=True)
-# # Compute the log probability of the selected action
-# log_prob = dist.log_prob(action)
-
-# # Append the results to their respective lists
-# actions.append(action)
-# action_log_probs.append(log_prob)
-
-# # Concatenate actions and log probabilities across all action dimensions
-# actions = torch.cat(actions, dim=0).unsqueeze(0)
-# action_log_probs = torch.cat(action_log_probs, dim=0).sum(dim=0, keepdim=True).unsqueeze(0)
