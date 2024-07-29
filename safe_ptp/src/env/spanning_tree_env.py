@@ -20,7 +20,6 @@ class SpanningTreeEnv(gym.Env):
     def __init__(self, min_nodes, 
                        max_nodes, 
                        min_redundancy, 
-                       max_redundancy, 
                        start_difficulty_level=1,
                        final_difficulty_level=10,
                        num_timestep_cooldown=250000, 
@@ -38,7 +37,6 @@ class SpanningTreeEnv(gym.Env):
         self.min_nodes = min_nodes
         self.max_nodes = max_nodes
         self.min_redundancy = min_redundancy
-        self.max_redundancy = max_redundancy
         self.min_attacked_nodes = min_attacked_nodes
         self.max_attacked_nodes = max_attacked_nodes
 
@@ -233,7 +231,7 @@ class SpanningTreeEnv(gym.Env):
         self.current_step = 0 
 
         # Create a new network environment for each episode
-        self.network_env = NetworkEnvironment(self.min_nodes, self.max_nodes, self.min_redundancy, self.max_redundancy)
+        self.network_env = NetworkEnvironment(self.min_nodes, self.max_nodes, self.min_redundancy)
         
         # Reset the network environment and get the initial network
         self.network = self.network_env.reset()
@@ -519,7 +517,6 @@ if __name__ == "__main__":
     env = SpanningTreeEnv(min_nodes=20, 
                           max_nodes=20, 
                           min_redundancy=3, 
-                          max_redundancy=4, 
                           min_attacked_nodes=1, 
                           max_attacked_nodes=2,
                           start_difficulty_level=16,

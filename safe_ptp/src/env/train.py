@@ -18,8 +18,7 @@ START_DIFFICULTY_LEVEL = 1
 FINAL_DIFFICULTY_LEVEL = 1
 MIN_NODES = 5
 MAX_NODES = 5
-MIN_REDUNDANCY = 2
-MAX_REDUNDANCY = 4
+MIN_REDUNDANCY = 3
 TRAINING_MODE = True
 RENDER_EVAL_ENV = False
 SHOW_WEIGHT_LABELS = False
@@ -154,10 +153,9 @@ def main():
     env = make_vec_env(lambda: SpanningTreeEnv(min_nodes=MIN_NODES, 
                                                max_nodes=MAX_NODES, 
                                                min_redundancy=MIN_REDUNDANCY, 
-                                               max_redundancy=MAX_REDUNDANCY,
                                                start_difficulty_level=START_DIFFICULTY_LEVEL, 
                                                final_difficulty_level=FINAL_DIFFICULTY_LEVEL,
-                                               render_mode=render_mode, 
+                                               render_mode=True, 
                                                show_weight_labels=SHOW_WEIGHT_LABELS), 
                                                n_envs=n_envs)
 
@@ -167,7 +165,6 @@ def main():
         eval_env = make_vec_env(lambda: SpanningTreeEnv(min_nodes=MIN_NODES, 
                                                 max_nodes=MAX_NODES, 
                                                 min_redundancy=MIN_REDUNDANCY, 
-                                                max_redundancy=MAX_REDUNDANCY, 
                                                 start_difficulty_level=START_DIFFICULTY_LEVEL, 
                                                 final_difficulty_level=FINAL_DIFFICULTY_LEVEL,
                                                 render_mode=RENDER_EVAL_ENV), 

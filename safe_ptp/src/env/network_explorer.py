@@ -4,7 +4,6 @@ import networkx as nx
 from safe_ptp.src.env.network_env import NetworkEnvironment
 
 MIN_REDUNDANCY = 2
-MAX_REDUNDANCY = 4
 
 def create_networks(sizes, count):
     """
@@ -21,7 +20,7 @@ def create_networks(sizes, count):
     for size in sizes:
         for _ in range(count):
             # Create network environment with specific node count
-            net_env = NetworkEnvironment(min_nodes=size, max_nodes=size, min_redundancy=MIN_REDUNDANCY, max_redundancy=MAX_REDUNDANCY)
+            net_env = NetworkEnvironment(min_nodes=size, max_nodes=size, min_redundancy=MIN_REDUNDANCY)
             network = net_env.reset()  # Reset environment which also creates a new network
 
             # Calculate total weight of the network

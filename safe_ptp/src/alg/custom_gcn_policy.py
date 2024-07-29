@@ -4,7 +4,7 @@ from torch.optim import Adam
 from torch.distributions import Bernoulli
 import torch.nn.functional as F
 import torch_geometric.nn as gnn
-from torch_geometric.utils import add_self_loops
+from torch_geometric.utils import add_self_loops, degree
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.policies import ActorCriticPolicy
 
@@ -16,15 +16,41 @@ class GNNFeatureExtractor(BaseFeaturesExtractor):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Define the number of features each node has
-        # node_feature_dim = 1  # Includes attacked status
-
-        # Regular Features
         node_feature_dim = observation_space['node_features'].shape[1]
-        # Get number of nodes for one-hot encoding addition
-        num_nodes = observation_space['node_features'].shape[0]
 
-        self.gcn_full = gnn.GCNConv(node_feature_dim + num_nodes, features_dim // 2).to(self.device)
-        self.gcn_mst = gnn.GCNConv(node_feature_dim + num_nodes, features_dim // 2).to(self.device)
+        # GIN Layers with MLPs for Physical Full Network
+        self.gin_full1 = gnn.GINConv(
+            nn=torch.nn.Sequential(
+                torch.nn.Linear(node_feature_dim + 2, features_dim // 2),
+                torch.nn.ReLU(),
+                torch.nn.Linear(features_dim // 2, features_dim // 2)
+            )
+        ).to(self.device)
+        
+        self.gin_full2 = gnn.GINConv(
+            nn=torch.nn.Sequential(
+                torch.nn.Linear(features_dim // 2, features_dim // 2),
+                torch.nn.ReLU(),
+                torch.nn.Linear(features_dim // 2, features_dim // 2)
+            )
+        ).to(self.device)
+        
+        # GIN Layers with MLPs for Spanning Tree
+        self.gin_mst1 = gnn.GINConv(
+            nn=torch.nn.Sequential(
+                torch.nn.Linear(node_feature_dim + 2, features_dim // 2),
+                torch.nn.ReLU(),
+                torch.nn.Linear(features_dim // 2, features_dim // 2)
+            )
+        ).to(self.device)
+        
+        self.gin_mst2 = gnn.GINConv(
+            nn=torch.nn.Sequential(
+                torch.nn.Linear(features_dim // 2, features_dim // 2),
+                torch.nn.ReLU(),
+                torch.nn.Linear(features_dim // 2, features_dim // 2)
+            )
+        ).to(self.device)
 
     def forward(self, observations):
         # Keep batch dimensions intact, move to device and cast types
@@ -42,13 +68,7 @@ class GNNFeatureExtractor(BaseFeaturesExtractor):
         for idx in range(node_features.size(0)):
             nf = node_features[idx]  # Node features for one graph instance
             num_nodes = nf.size(0)
-
-            # One-hot encoding for node indices
-            one_hot_indices = torch.eye(num_nodes, device=self.device)
-
-            # Concatenate original node features with one-hot encoded indices and degrees
-            nf = torch.cat([nf, one_hot_indices], dim=1)
-
+            
             # Physical Network Processing
             pei = physical_edge_indices[idx]
             pew = physical_edge_weights[idx]
@@ -79,19 +99,50 @@ class GNNFeatureExtractor(BaseFeaturesExtractor):
             valid_spanning_indices, valid_spanning_weights = add_self_loops(
                 valid_spanning_indices, valid_spanning_weights, fill_value=1.0, num_nodes=num_nodes)
 
-            # GCN Layer
-            x_full = self.gcn_full(nf, valid_physical_indices, valid_physical_weights)
-            x_mst = self.gcn_mst(nf, valid_spanning_indices, valid_spanning_weights)
+            # Calculate node degree and clustering coefficient
+            physical_degrees = degree(valid_physical_indices[0], num_nodes).unsqueeze(1)
+            # physical_clustering_coeff = gnn.clustering_coefficient(valid_physical_indices, num_nodes).unsqueeze(1)
 
-            # GCN Activation
+            spanning_degrees = degree(valid_spanning_indices[0], num_nodes).unsqueeze(1)
+            # spanning_clustering_coeff = gnn.clustering_coefficient(valid_spanning_indices, num_nodes).unsqueeze(1)
+
+            # Add anchor node (position-aware feature)
+            anchor_node = torch.zeros((1, nf.size(1)), device=self.device)
+            nf = torch.cat([nf, anchor_node], dim=0)
+            num_nodes += 1
+
+            # # Add anchor edges for both physical and spanning networks
+            # anchor_edges = torch.tensor([[num_nodes-1] * (num_nodes-1), list(range(num_nodes-1))], device=self.device)
+            # physical_edge_indices = torch.cat([physical_edge_indices[idx], anchor_edges], dim=1)
+            # physical_edge_weights = torch.cat([physical_edge_weights[idx], torch.ones(anchor_edges.size(1), device=self.device)], dim=0)
+
+            # spanning_edge_indices = torch.cat([spanning_edge_indices[idx], anchor_edges], dim=1)
+            # spanning_edge_weights = torch.cat([spanning_edge_weights[idx], torch.ones(anchor_edges.size(1), device=self.device)], dim=0)
+
+            # Concatenate original node features with degree and clustering coefficient
+            nf_physical = torch.cat([nf, physical_degrees, physical_clustering_coeff], dim=1)
+            nf_spanning = torch.cat([nf, spanning_degrees, spanning_clustering_coeff], dim=1)
+
+
+            # Color Refinement: Apply multiple GIN Layers with ReLU activation for physical network
+            x_full = self.gin_full1(nf_physical, valid_physical_indices)
             x_full = F.relu(x_full)
+            x_full = self.gin_full2(x_full, valid_physical_indices)
+            x_full = F.relu(x_full)
+
+            # Global Mean Pooling for physical network
+            x_full_pooled = gnn.global_mean_pool(x_full, batch=torch.zeros(num_nodes, dtype=torch.long, device=self.device))
+
+            # Color Refinement: Apply multiple GIN Layers with ReLU activation for spanning tree network
+            x_mst = self.gin_mst1(nf_spanning, valid_spanning_indices)
+            x_mst = F.relu(x_mst)
+            x_mst = self.gin_mst2(x_mst, valid_spanning_indices)
             x_mst = F.relu(x_mst)
 
-            # GCN Aggregator
-            x_full_pooled = gnn.global_mean_pool(x_full, batch=torch.zeros(num_nodes, dtype=torch.long, device=self.device))
+            # Global Mean Pooling for spanning tree network
             x_mst_pooled = gnn.global_mean_pool(x_mst, batch=torch.zeros(num_nodes, dtype=torch.long, device=self.device))
 
-            # Combine features from both GCN outputs
+            # Combine features from both pooled GIN outputs
             combined_features = torch.cat([x_full_pooled, x_mst_pooled], dim=-1)
             features_list.append(combined_features)
 
@@ -99,6 +150,7 @@ class GNNFeatureExtractor(BaseFeaturesExtractor):
         final_combined_features = torch.cat(features_list, dim=0)
 
         return final_combined_features
+
 
 class CustomGNNActorCriticPolicy(ActorCriticPolicy):
     def __init__(self, observation_space, action_space, lr_schedule, features_dim=256, **kwargs):
