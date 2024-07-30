@@ -127,7 +127,7 @@ class SpanningTreeEnv(gym.Env):
 
         # # Define the space with correct low and high arrays
         # node_features_space = spaces.Box(low=low, high=high, dtype=np.int32)
-        node_features_space = spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes, 1), dtype=np.int32)
+        node_features_space = spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes, 5), dtype=np.int32)
 
         # Physical Edge Indices List
         physical_edge_indices_space = spaces.Box(low=0, high=self.max_difficulty_num_nodes-1, shape=(self.max_difficulty_max_num_edges, 2), dtype=np.int32)
@@ -147,7 +147,8 @@ class SpanningTreeEnv(gym.Env):
         valid_action_mask = spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.uint8)
 
         self.observation_space = spaces.Dict({
-            "node_features": node_features_space,
+            "physical_node_features": node_features_space,
+            "spanning_node_features": node_features_space,
             "physical_edge_indices": physical_edge_indices_space,
             "physical_edge_weights": physical_edge_weights_space,
             "physical_edge_mask": physical_edge_mask_space,
@@ -237,7 +238,7 @@ class SpanningTreeEnv(gym.Env):
         self.network = self.network_env.reset()
 
         # Retrieve positions after reset
-        self.pos = self.network_env.get_positions(self.network) 
+        self.pos = self.network_env.get_positions() 
 
         # Clear the previous spanning tree if it exists
         if self.tree is not None:
@@ -277,14 +278,26 @@ class SpanningTreeEnv(gym.Env):
         size = self.max_difficulty_num_nodes
         max_edges = self.max_difficulty_max_num_edges
 
-        # Node features: Attacked status (0 or 1) and node index
-        node_features = np.zeros((size, 1), dtype=np.int32)  
-        # Set the first feature for attacked nodes
+        # Initialize node features arrays for physical network and spanning tree
+        physical_node_features = np.zeros((size, 5), dtype=np.float32)
+        spanning_node_features = np.zeros((size, 5), dtype=np.float32)
+            
+        # Set attacked status for node features
         for node in self.attacked_nodes:
-            node_features[node][0] = 1
-        # # Set the second feature as the node index
-        # for node in range(size):
-        #     node_features[node, 1] = node  
+            physical_node_features[node][0] = 1
+            spanning_node_features[node][0] = 1
+
+        # Compute node features for physical network
+        degrees = np.array([d for _, d in self.network.degree()], dtype=np.float32)
+        clustering = np.array([c for _, c in nx.clustering(self.network).items()], dtype=np.float32)
+        eigenvector_centrality = np.array([e for _, e in nx.eigenvector_centrality(self.network, max_iter=1000).items()], dtype=np.float32)
+        betweenness_centrality = np.array([b for _, b in nx.betweenness_centrality(self.network).items()], dtype=np.float32)
+
+        for node in range(self.num_nodes):
+            physical_node_features[node, 1] = degrees[node] if node < len(degrees) else 0
+            physical_node_features[node, 2] = clustering[node] if node < len(clustering) else 0
+            physical_node_features[node, 3] = eigenvector_centrality[node] if node < len(eigenvector_centrality) else 0
+            physical_node_features[node, 4] = betweenness_centrality[node] if node < len(betweenness_centrality) else 0
 
         # Prepare padded arrays for edge indices, weights, and masks
         physical_network_edges_indices = np.zeros((max_edges, 2), dtype=np.int32)
@@ -306,6 +319,18 @@ class SpanningTreeEnv(gym.Env):
 
         # Fill actual data for the spanning tree, if available
         if self.tree.number_of_edges() > 0:
+            # Compute node features for physical network
+            degrees = np.array([d for _, d in self.tree.degree()], dtype=np.float32)
+            clustering = np.array([c for _, c in nx.clustering(self.tree).items()], dtype=np.float32)
+            eigenvector_centrality = np.array([e for _, e in nx.eigenvector_centrality(self.tree, max_iter=1000).items()], dtype=np.float32)
+            betweenness_centrality = np.array([b for _, b in nx.betweenness_centrality(self.tree).items()], dtype=np.float32)
+
+            for node in range(self.num_nodes):
+                spanning_node_features[node, 1] = degrees[node] if node < len(degrees) else 0
+                spanning_node_features[node, 2] = clustering[node] if node < len(clustering) else 0
+                spanning_node_features[node, 3] = eigenvector_centrality[node] if node < len(eigenvector_centrality) else 0
+                spanning_node_features[node, 4] = betweenness_centrality[node] if node < len(betweenness_centrality) else 0
+
             # Fill actual data for the spanning tree
             actual_spanning_tree_edges = np.array([[u, v] for u, v in self.tree.edges()], dtype=np.int32)
             actual_spanning_tree_weights = np.array([[self.tree.edges[u, v]['weight']] for u, v in self.tree.edges()], dtype=np.float32)
@@ -316,7 +341,8 @@ class SpanningTreeEnv(gym.Env):
             spanning_tree_edge_mask[:actual_spanning_tree_edges.shape[0], 0] = 1 
 
         return {
-            "node_features": node_features,
+            "physical_node_features": physical_node_features,
+            "spanning_node_features": spanning_node_features,
             "physical_edge_indices": physical_network_edges_indices,
             "physical_edge_weights": physical_network_weights,
             "physical_edge_mask": physical_edge_mask,
@@ -514,13 +540,13 @@ class SpanningTreeEnv(gym.Env):
 # Example usage
 if __name__ == "__main__":
     # Create the SpanningTreeEnv environment
-    env = SpanningTreeEnv(min_nodes=20, 
-                          max_nodes=20, 
+    env = SpanningTreeEnv(min_nodes=6, 
+                          max_nodes=6, 
                           min_redundancy=3, 
                           min_attacked_nodes=1, 
                           max_attacked_nodes=2,
-                          start_difficulty_level=16,
-                          final_difficulty_level=16,
+                          start_difficulty_level=2,
+                          final_difficulty_level=2,
                           num_timestep_cooldown=2, 
                           show_weight_labels=SHOW_WEIGHT_LABELS, 
                           render_mode=True, 

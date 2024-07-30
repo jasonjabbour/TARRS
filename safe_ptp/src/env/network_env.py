@@ -14,6 +14,7 @@ class NetworkEnvironment:
         self.num_nodes = None
         self.redundancy = None
         self.network = None
+        self.positions = None
 
         # List of available graph generator function names
         self.generators = [
@@ -107,7 +108,7 @@ class NetworkEnvironment:
         
         :param n: The number of rungs in the ladder.
         """
-        G = nx.ladder_graph(n)
+        G = nx.ladder_graph(n//2)
         return G, nx.spring_layout(G)
 
     def create_star_graph(self, n=10):
@@ -119,7 +120,7 @@ class NetworkEnvironment:
         
         :param n: The total number of nodes in the star.
         """
-        G = nx.star_graph(n)
+        G = nx.star_graph(n-1)
         return G, nx.spring_layout(G)
 
     def create_wheel_graph(self, n=10):
@@ -224,10 +225,11 @@ class NetworkEnvironment:
             try:
                 if self.network is not None:
                     self.network.clear()
+                    self.positions = None
 
                 # Randomly select a generator function from the list of available generators
                 generator_name = random.choice(self.generators + ['create_combined_network'] * com_net_occurancy_rate)
-
+                # print(f'Generator: {generator_name}')
                 generator = getattr(self, generator_name)
 
                 # Randomly determine the number of nodes
@@ -258,6 +260,9 @@ class NetworkEnvironment:
         plt.title(title)
         plt.show()
     
+    def get_positions(self):
+        return self.positions
+    
     def print_node_degrees(self):
         """
         Print the degrees of each node in the network.
@@ -277,5 +282,6 @@ if __name__ == '__main__':
     
     # Generate and visualize the network
     network = network_env.reset()
+            
     # network_env.print_node_degrees()
     network_env.visualize_network(network, network_env.positions, add_edge_labels=LABEL_EDGES, title="Random Network Visualization")
