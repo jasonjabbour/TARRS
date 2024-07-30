@@ -145,6 +145,8 @@ class SpanningTreeEnv(gym.Env):
 
         # Mask to communicate what actions are allowed to be taken
         valid_action_mask = spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes, self.max_difficulty_num_nodes), dtype=np.uint8)
+        # Define the first node choice mask to indicate valid first nodes
+        first_node_action_mask = spaces.Box(low=0, high=1, shape=(self.max_difficulty_num_nodes,), dtype=np.uint8)
 
         self.observation_space = spaces.Dict({
             "physical_node_features": node_features_space,
@@ -156,6 +158,7 @@ class SpanningTreeEnv(gym.Env):
             "spanning_tree_edge_weights": spanning_tree_edge_weights_space,
             "spanning_tree_edge_mask": spanning_tree_edge_mask_space,
             "action_mask": valid_action_mask, 
+            "first_node_action_mask": first_node_action_mask
         })
 
         # Initialize placeholder for node positions
@@ -340,6 +343,12 @@ class SpanningTreeEnv(gym.Env):
             # Add mask for the spanning tree
             spanning_tree_edge_mask[:actual_spanning_tree_edges.shape[0], 0] = 1 
 
+        # Define first node choice mask (1 for nodes in the spanning tree, 0 otherwise)
+        first_node_action_mask = np.zeros(size, dtype=np.uint8)
+        for node in self.tree.nodes():
+            if self.tree.degree[node] > 0:  # Check if the node has any edges in the spanning tree
+                first_node_action_mask[node] = 1
+
         return {
             "physical_node_features": physical_node_features,
             "spanning_node_features": spanning_node_features,
@@ -350,6 +359,7 @@ class SpanningTreeEnv(gym.Env):
             "spanning_tree_edge_weights": spanning_tree_weights,
             "spanning_tree_edge_mask": spanning_tree_edge_mask,
             "action_mask": self.action_mask, 
+            "first_node_action_mask": first_node_action_mask,
         }
 
     def create_initial_action_mask(self, network, num_nodes):

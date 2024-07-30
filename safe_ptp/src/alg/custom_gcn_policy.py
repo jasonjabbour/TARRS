@@ -82,7 +82,8 @@ class GNNFeatureExtractor(BaseFeaturesExtractor):
         spanning_edge_mask = observations['spanning_tree_edge_mask'].to(self.device).bool()
 
         features_list = []
-
+        features_unflattened_list = []
+    
         for idx in range(physical_node_features.size(0)):
             nf_physical = physical_node_features[idx]  # Node features for one graph instance
             nf_spanning = spanning_node_features[idx] 
@@ -144,18 +145,30 @@ class GNNFeatureExtractor(BaseFeaturesExtractor):
             x_mst = self.gin_mst3(x_mst, undirected_valid_spanning_indices)
             x_mst = F.relu(x_mst)
 
-            # Combine features from both pooled GIN outputs
-            combined_features = torch.cat([x_full, x_mst], dim=-1)
+            # Store the original (non-flattened) features (for easy access later) [num nodes, embedding features]
+            features_unflattened = torch.cat([x_full, x_mst], dim=-1)
+            features_unflattened_list.append(features_unflattened)
+
+            # Flatten the GIN outputs
+            x_full_flat = x_full.flatten(start_dim=0)
+            x_mst_flat = x_mst.flatten(start_dim=0)
+
+            # Combine features from both GIN outputs [numnodes * embedding features]
+            combined_features = torch.cat([x_full_flat, x_mst_flat], dim=-1)
             features_list.append(combined_features)
 
-        # Concatenate pooled features from all graphs in the batch
-        final_combined_features = torch.cat(features_list, dim=0)
+        # Unflattened features from all graphs in batch [batch, num nodes, embedding features]
+        final_features_unflattened = torch.stack(features_unflattened_list, dim=0)
 
-        return final_combined_features
+        # Concatenate features from all graphs in the batch [batch, num nodes * embedding features]
+        final_features = torch.stack(features_list, dim=0)
+
+
+        return final_features, final_features_unflattened
 
 
 class CustomGNNActorCriticPolicy(ActorCriticPolicy):
-    def __init__(self, observation_space, action_space, lr_schedule, features_dim=16, **kwargs):
+    def __init__(self, observation_space, action_space, lr_schedule, features_dim=32, **kwargs):
         # Call the super constructor first
         super(CustomGNNActorCriticPolicy, self).__init__(
             observation_space, action_space, lr_schedule,
@@ -170,25 +183,35 @@ class CustomGNNActorCriticPolicy(ActorCriticPolicy):
         # Extract the size of the MultiDiscrete space, which equals the max number of nodes
         self.num_nodes = self.action_space.nvec[0]
 
-        # Actor outputs logits for each node pair
-        self.actor = nn.Sequential(
-            nn.Linear(features_dim, features_dim),
+        self.features_dim = features_dim
+
+        # Define the first actor network for selecting the first node
+        self.actor_first = nn.Sequential(
+            nn.Linear(self.features_dim * self.num_nodes, (self.features_dim * self.num_nodes)//2),
             nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(features_dim, self.num_nodes),
+            nn.Linear((self.features_dim * self.num_nodes)//2, self.num_nodes),
             nn.ReLU()
         ).to(self._device)
 
+        # Define the second actor network for selecting the second node based on the first node's embedding
+        self.actor_second = nn.Sequential(
+            nn.Linear((self.features_dim * self.num_nodes) + self.features_dim, (self.features_dim * self.num_nodes)//2),
+            nn.ReLU(),
+            nn.Linear((self.features_dim * self.num_nodes)//2, self.num_nodes),
+            nn.ReLU()
+        ).to(self._device)
+
+        # Define the critic network for evaluating the state value
         self.critic = nn.Sequential(
-            nn.Linear(features_dim, features_dim),
+            nn.Linear(self.features_dim * self.num_nodes, (self.features_dim * self.num_nodes)//2),
             nn.ReLU(),
-            nn.Linear(features_dim, features_dim),
+            nn.Linear((self.features_dim * self.num_nodes)//2, (self.features_dim * self.num_nodes)//2),
             nn.ReLU(),
-            nn.Linear(features_dim, 1)
+            nn.Linear((self.features_dim * self.num_nodes)//2, 1)
         ).to(self._device)
 
         # Assigning the actor network list to action_net, used by the base class.
-        self.action_net = self.actor
+        self.action_net = nn.ModuleList([self.actor_first, self.actor_second])
         # Assigning the critic network to value_net, used by the base class.
         self.value_net = self.critic
 
@@ -207,7 +230,7 @@ class CustomGNNActorCriticPolicy(ActorCriticPolicy):
         """
         obs_tensors = {k: v.to(self._device) if torch.is_tensor(v) else torch.tensor(v, dtype=torch.float32).to(self._device) for k, v in obs.items()}
         # Ensure input tensors are on the right device
-        features = self.features_extractor(obs_tensors)  
+        features, _ = self.features_extractor(obs_tensors)  
         # Execute model prediction
         return self.value_net(features) 
     
@@ -218,40 +241,71 @@ class CustomGNNActorCriticPolicy(ActorCriticPolicy):
             # If the observation is a tuple, unpack it as needed
             obs = obs[0]
 
-        # Ensure that each item in the observation dictionary is converted to a tensor and moved to the correct device
-        obs_tensors = {k: v.to(self._device) if torch.is_tensor(v) else torch.tensor(v, dtype=torch.float32).to(self._device) for k, v in obs.items()}
+        # Convert all observation inputs to tensors and ensure they are on the correct device
+        obs_tensors = {k: torch.as_tensor(v, dtype=torch.float32).to(self._device) if not torch.is_tensor(v) else v.to(self._device) for k, v in obs.items()}
 
-        # Extract features using the custom feature extractor
-        features = self.features_extractor(obs_tensors)  # Directly use the feature extractor here
+        # Extract features from observations using the custom feature extractor
+        features, features_unflattened = self.features_extractor(obs_tensors)
 
         # Extract the action mask from the observations, ensuring it's in the correct format and device
         action_mask = obs_tensors['action_mask'].to(self._device)
 
-        # Compute logits using the actor network and reshape them to match the action mask dimensions
-        logits = self.actor(features).view(-1, self.num_nodes, self.num_nodes)
+        # Get the mask for the first node selection
+        first_node_action_mask = obs_tensors['first_node_action_mask'].to(self._device)
 
-        # Apply the action mask to logits; invalid actions get set to '-inf' to exclude them from selection
-        masked_logits = torch.where(action_mask.bool(), logits, torch.tensor(float('-inf')).to(self._device))
+        # Compute logits using the first actor network
+        logits_first = self.actor_first(features)
 
-        # Apply softmax to convert masked logits into probabilities and view as a flat vector instead of a matrix
-        probabilities = F.softmax(masked_logits.flatten(1), dim=-1) #.view(-1, self.num_nodes, self.num_nodes)
+        # TODO: CHECK IF MASK IS CORRECT
+        # Apply the spanning tree mask to ensure the first node is from the spanning tree (or any node if the spanning tree is empty)
+        # Also make sure that each node has a potential new edge it can connect to
+        if first_node_action_mask.sum() > 0:
+            # Combine the first node action mask with the action mask to ensure the first node has potential edges
+            combined_mask = first_node_action_mask * (action_mask.sum(dim=-1) > 0).float()
+            # Invalid actions get set to '-inf' to exclude them from selection
+            masked_logits_first = torch.where(combined_mask.bool(), logits_first, torch.tensor(float('-inf')).to(self._device))
+        else:
+            masked_logits_first = logits_first
+
+        # Apply softmax to convert masked logits into probabilities and view as a flat vector
+        probabilities_first = F.softmax(masked_logits_first.flatten(1), dim=-1)
 
         # Create a categorical distribution from the probabilities to sample actions
-        dist = torch.distributions.Categorical(probabilities)
+        dist_first = torch.distributions.Categorical(probabilities_first)
 
         # Sample or select the single maximum probability action based on whether deterministic mode is on
-        flat_action_index = dist.sample() if not deterministic else torch.argmax(probabilities, dim=1)
+        first_node = dist_first.sample() if not deterministic else torch.argmax(probabilities_first, dim=-1)
 
-        # Convert flat index to 2D matrix indices representing the nodes
-        node_i = flat_action_index // self.num_nodes
-        node_j = flat_action_index % self.num_nodes
+        # Fetch the features of the first selected node from unflattened features
+        first_node_features = torch.stack([features_unflattened[i, first_node[i], :] for i in range(first_node.size(0))], dim=0)
 
-        # Create a tensor from the node indices
-        action = torch.stack([node_i, node_j], dim=-1)
+        # Combine the features of the first node with each node's features
+        combined_features = torch.cat([features, first_node_features], dim=-1)
 
-        # Fetch log probability handling any batch dimensions
-        log_prob = dist.log_prob(flat_action_index).view(-1, 1)
+        # Compute logits using the second actor network
+        logits_second = self.actor_second(combined_features).view(-1, self.num_nodes)
 
+        # TODO: CHECK IF MASK IS CORRECT
+        # Apply the action mask for the second node selection
+        masked_logits_second = torch.where(action_mask[torch.arange(action_mask.size(0)), first_node], logits_second, torch.tensor(float('-inf')).to(self._device))
+
+        # Apply softmax to convert masked logits into probabilities for the second node
+        probabilities_second = F.softmax(masked_logits_second.flatten(1), dim=-1)
+
+        # Create a categorical distribution from the probabilities to sample actions
+        dist_second = torch.distributions.Categorical(probabilities_second)
+
+        # Sample or select the single maximum probability action based on whether deterministic mode is on
+        second_node = dist_second.sample() if not deterministic else torch.argmax(probabilities_second, dim=-1)
+
+        # Combine the selected nodes into an action tensor
+        action = torch.stack([first_node, second_node], dim=-1)
+
+        # Compute the log probabilities for the selected nodes
+        log_prob_first = dist_first.log_prob(first_node).view(-1, 1)
+        log_prob_second = dist_second.log_prob(second_node).view(-1, 1)
+        log_prob = log_prob_first + log_prob_second
+ 
         # Evaluate the state value using the critic network
         values = self.critic(features)
 
@@ -264,31 +318,63 @@ class CustomGNNActorCriticPolicy(ActorCriticPolicy):
         obs_tensors = {k: torch.as_tensor(v, dtype=torch.float32).to(self._device) if not torch.is_tensor(v) else v.to(self._device) for k, v in obs.items()}
 
         # Extract features from observations using the custom feature extractor
-        features = self.features_extractor(obs_tensors)
+        features, features_unflattened = self.features_extractor(obs_tensors)
 
         # Extract the action mask from the observations, ensuring it's in the correct format and device
         action_mask = obs_tensors['action_mask'].to(self._device)
 
-        # Compute logits using the actor network and reshape them to match the action mask dimensions
-        logits = self.actor(features).view(-1, self.num_nodes, self.num_nodes)
+        # Get the mask for the first node selection
+        first_node_action_mask = obs_tensors['first_node_action_mask'].to(self._device)
 
-        # Apply the action mask to logits; invalid actions get set to '-inf' to exclude them from selection
-        masked_logits = torch.where(action_mask.bool(), logits, torch.tensor(float('-inf')).to(self._device))
+        # Compute logits using the first actor network
+        logits_first = self.actor_first(features)
+        
+        # Apply the spanning tree mask to ensure the first node is from the spanning tree (or any node if the spanning tree is empty)
+        if first_node_action_mask.sum() > 0:
+            # Combine the first node action mask with the action mask to ensure the first node has potential edges
+            combined_mask = first_node_action_mask * (action_mask.sum(dim=-1) > 0).float()
+            # Invalid actions get set to '-inf' to exclude them from selection
+            masked_logits_first = torch.where(combined_mask.bool(), logits_first, torch.tensor(float('-inf')).to(self._device))
+        else:
+            masked_logits_first = logits_first
 
-        # Apply softmax to convert masked logits into probabilities and view as a flat vector instead of a matrix
-        probabilities = F.softmax(masked_logits.flatten(1), dim=-1)
+        # Apply softmax to convert masked logits into probabilities and view as a flat vector
+        probabilities_first = F.softmax(masked_logits_first.flatten(1), dim=-1)
+
+        # Create a categorical distribution from the probabilities to sample actions
+        dist_first = torch.distributions.Categorical(probabilities_first)
+
+        # Extract the first node from actions
+        first_node = actions[:, 0]
+
+        # Fetch the features of the first selected node from unflattened features
+        first_node_features = torch.stack([features_unflattened[i, first_node[i], :] for i in range(first_node.size(0))], dim=0)
+
+        # Combine the features of the first node with each node's features
+        combined_features = torch.cat([features, first_node_features], dim=-1)
+
+        # Compute logits using the second actor network
+        logits_second = self.actor_second(combined_features).view(-1, self.num_nodes)
+
+        # Apply the action mask for the second node selection
+        masked_logits_second = torch.where(action_mask[torch.arange(action_mask.size(0)), first_node], logits_second, torch.tensor(float('-inf')).to(self._device))
+
+        # Apply softmax to convert masked logits into probabilities for the second node
+        probabilities_second = F.softmax(masked_logits_second.flatten(1), dim=-1)
 
         # Create a categorical distribution from the probabilities
-        dist = torch.distributions.Categorical(probabilities)
+        dist_second = torch.distributions.Categorical(probabilities_second)
 
-        # Flatten the actions to match the probabilities shape for evaluation (do the opposite of the forward function)
-        flat_actions = actions[:, 0] * self.num_nodes + actions[:, 1]
+        # Extract the second node from actions
+        second_node = actions[:, 1]
 
         # Calculate the log probability for the given actions
-        log_probs = dist.log_prob(flat_actions)
+        log_prob_first = dist_first.log_prob(first_node)
+        log_prob_second = dist_second.log_prob(second_node)
+        log_probs = log_prob_first + log_prob_second
 
-        # Calculate the entropy of the distribution, a measure of randomness
-        entropy = dist.entropy()
+        # Calculate the entropy of the distributions, a measure of randomness
+        entropy = dist_first.entropy() + dist_second.entropy()
 
         # Evaluate the state value using the critic network
         values = self.critic(features)
@@ -300,37 +386,67 @@ class CustomGNNActorCriticPolicy(ActorCriticPolicy):
     def get_distribution(self, obs):
         """Get the action distribution based on the policy network's output."""
 
+        # Convert all observation inputs to tensors and ensure they are on the correct device
         obs_tensors = {k: torch.as_tensor(v, dtype=torch.float32).to(self._device) if not torch.is_tensor(v) else v.to(self._device) for k, v in obs.items()}
         
-        # Extract features and action mask from the observation
-        features = self.features_extractor(obs_tensors)
+        # Extract features and action masks from the observation
+        features, features_unflattened = self.features_extractor(obs_tensors)
         action_mask = obs_tensors['action_mask'].to(self._device)
-        
-        # Compute logits and apply the action mask
-        logits = self.actor(features).view(-1, self.num_nodes, self.num_nodes)
-        masked_logits = torch.where(action_mask.bool(), logits, torch.tensor(float('-inf')).to(self._device))
-        
-        # Apply softmax to convert masked logits into probabilities, flattening the matrix to a vector
-        probabilities = F.softmax(masked_logits.flatten(1), dim=-1)
-        
-        # Create a categorical distribution from the flattened probabilities
-        distribution = torch.distributions.Categorical(probabilities)
-        return distribution
+        first_node_action_mask = obs_tensors['first_node_action_mask'].to(self._device)
 
+        # Compute logits using the first actor network
+        logits_first = self.actor_first(features)
+
+        # Apply the spanning tree mask and action mask to ensure the first node is valid and has potential edges
+        if first_node_action_mask.sum() > 0:
+            combined_mask = first_node_action_mask * (action_mask.sum(dim=-1) > 0).float()
+            masked_logits_first = torch.where(combined_mask.bool(), logits_first, torch.tensor(float('-inf')).to(self._device))
+        else:
+            masked_logits_first = logits_first
+
+        # Apply softmax to convert masked logits into probabilities and create a categorical distribution
+        probabilities_first = F.softmax(masked_logits_first.flatten(1), dim=-1)
+        dist_first = torch.distributions.Categorical(probabilities_first)
+
+        return dist_first, features, features_unflattened, action_mask
 
     def _predict(self, obs, deterministic=False):
         """Predict actions based on the policy distribution and whether to use deterministic actions."""
 
-        # Compute the distribution using the prepared observations
-        distribution = self.get_distribution(obs)
+        # Get the first stage distribution and features
+        dist_first, features, features_unflattened, action_mask = self.get_distribution(obs)
 
         if deterministic:
             # If deterministic, choose the action with the highest probability
-            action_indices = torch.argmax(distribution.probs, dim=1)
+            first_node = torch.argmax(dist_first.probs, dim=1)
         else:
             # Otherwise, sample from the distribution
-            action_indices = distribution.sample()
+            first_node = dist_first.sample()
 
-        # Convert flat indices to matrix indices
-        action_pairs = (action_indices // self.num_nodes, action_indices % self.num_nodes)
-        return torch.stack(action_pairs, dim=1)
+        # Fetch the features of the first selected node from unflattened features
+        first_node_features = torch.stack([features_unflattened[i, first_node[i], :] for i in range(first_node.size(0))], dim=0)
+
+        # Combine the features of the first node with each node's features
+        combined_features = torch.cat([features, first_node_features], dim=-1)
+
+        # Compute logits using the second actor network
+        logits_second = self.actor_second(combined_features).view(-1, self.num_nodes)
+
+        # Apply the action mask for the second node selection
+        masked_logits_second = torch.where(action_mask[torch.arange(action_mask.size(0)), first_node], logits_second, torch.tensor(float('-inf')).to(self._device))
+
+        # Apply softmax to convert masked logits into probabilities and create a categorical distribution
+        probabilities_second = F.softmax(masked_logits_second.flatten(1), dim=-1)
+        dist_second = torch.distributions.Categorical(probabilities_second)
+
+        if deterministic:
+            # If deterministic, choose the action with the highest probability
+            second_node = torch.argmax(dist_second.probs, dim=1)
+        else:
+            # Otherwise, sample from the distribution
+            second_node = dist_second.sample()
+
+        # Combine the selected nodes into an action tensor
+        action = torch.stack([first_node, second_node], dim=-1)
+
+        return action
