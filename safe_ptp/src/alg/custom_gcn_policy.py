@@ -256,7 +256,7 @@ class CustomGNNActorCriticPolicy(ActorCriticPolicy):
         # Compute logits using the first actor network
         logits_first = self.actor_first(features)
 
-        # TODO: CHECK IF MASK IS CORRECT
+        # TODO: Handle batch dimension. Use implementation in evaluate_actions()
         # Apply the spanning tree mask to ensure the first node is from the spanning tree (or any node if the spanning tree is empty)
         # Also make sure that each node has a potential new edge it can connect to
         if first_node_action_mask.sum() > 0:
@@ -285,7 +285,7 @@ class CustomGNNActorCriticPolicy(ActorCriticPolicy):
         # Compute logits using the second actor network
         logits_second = self.actor_second(combined_features).view(-1, self.num_nodes)
 
-        # TODO: CHECK IF MASK IS CORRECT
+        # TODO: Handle batch dimension. Use implementation in evaluate_actions()
         # Apply the action mask for the second node selection
         masked_logits_second = torch.where(action_mask[torch.arange(action_mask.size(0)), first_node], logits_second, torch.tensor(float('-inf')).to(self._device))
 
@@ -329,14 +329,28 @@ class CustomGNNActorCriticPolicy(ActorCriticPolicy):
         # Compute logits using the first actor network
         logits_first = self.actor_first(features)
         
-        # Apply the spanning tree mask to ensure the first node is from the spanning tree (or any node if the spanning tree is empty)
-        if first_node_action_mask.sum() > 0:
-            # Combine the first node action mask with the action mask to ensure the first node has potential edges
-            combined_mask = first_node_action_mask * (action_mask.sum(dim=-1) > 0).float()
-            # Invalid actions get set to '-inf' to exclude them from selection
-            masked_logits_first = torch.where(combined_mask.bool(), logits_first, torch.tensor(float('-inf')).to(self._device))
+        # Determine if the input is batched or not
+        is_batched = len(first_node_action_mask.shape) == 2
+
+        if is_batched:
+            # Handle batched input
+            combined_mask = torch.zeros_like(first_node_action_mask).float()
+            for i in range(first_node_action_mask.size(0)):
+                if first_node_action_mask[i].sum() > 0:
+                    # Combine the first node action mask with the action mask for valid nodes
+                    combined_mask[i] = first_node_action_mask[i] * (action_mask[i].sum(dim=-1) > 0).float()
+                else:
+                    # If no valid first node mask, default to allowing all logits (unmasked)
+                    combined_mask[i] = torch.ones_like(first_node_action_mask[i])
         else:
-            masked_logits_first = logits_first
+            # Handle single input (non-batched)
+            if first_node_action_mask.sum() > 0:
+                combined_mask = first_node_action_mask * (action_mask.sum(dim=-1) > 0).float()
+            else:
+                combined_mask = torch.ones_like(first_node_action_mask)
+
+        # Invalid actions get set to '-inf' to exclude them from selection
+        masked_logits_first = torch.where(combined_mask.bool(), logits_first, torch.tensor(float('-inf')).to(self._device))
 
         # Apply softmax to convert masked logits into probabilities and view as a flat vector
         probabilities_first = F.softmax(masked_logits_first.flatten(1), dim=-1)
@@ -347,6 +361,9 @@ class CustomGNNActorCriticPolicy(ActorCriticPolicy):
         # Extract the first node from actions
         first_node = actions[:, 0]
 
+        # Ensure that first_node is an integer tensor
+        first_node = first_node.long()
+
         # Fetch the features of the first selected node from unflattened features
         first_node_features = torch.stack([features_unflattened[i, first_node[i], :] for i in range(first_node.size(0))], dim=0)
 
@@ -356,8 +373,16 @@ class CustomGNNActorCriticPolicy(ActorCriticPolicy):
         # Compute logits using the second actor network
         logits_second = self.actor_second(combined_features).view(-1, self.num_nodes)
 
-        # Apply the action mask for the second node selection
-        masked_logits_second = torch.where(action_mask[torch.arange(action_mask.size(0)), first_node], logits_second, torch.tensor(float('-inf')).to(self._device))
+        # Determine if the input is batched or not
+        is_batched = len(action_mask.shape) == 3
+
+        if is_batched:
+            # Apply the action mask for the second node selection with batch dimension
+            batch_indices = torch.arange(action_mask.size(0)).to(self._device)  # Create indices for the batch dimension
+            masked_logits_second = torch.where(action_mask[batch_indices, first_node].bool(), logits_second, torch.tensor(float('-inf')).to(self._device))
+        else:
+            # Apply the action mask for the second node selection without batch dimension
+            masked_logits_second = torch.where(action_mask[first_node].bool(), logits_second, torch.tensor(float('-inf')).to(self._device))
 
         # Apply softmax to convert masked logits into probabilities for the second node
         probabilities_second = F.softmax(masked_logits_second.flatten(1), dim=-1)

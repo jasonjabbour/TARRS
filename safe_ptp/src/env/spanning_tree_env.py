@@ -75,6 +75,7 @@ class SpanningTreeEnv(gym.Env):
         self.network = None
         self.tree = None
         self.action_mask = None
+        self.first_node_action_mask = None
        
         # Initialize placeholders for the number of nodes, action space, and observation space
         self.max_difficulty_num_nodes = 4 + NUM_NODE_INCREASE_RATE_PER_LEVEL *  self.final_difficulty_level
@@ -234,33 +235,43 @@ class SpanningTreeEnv(gym.Env):
         # Reset timestep
         self.current_step = 0 
 
-        # Create a new network environment for each episode
-        self.network_env = NetworkEnvironment(self.min_nodes, self.max_nodes, self.min_redundancy)
-        
-        # Reset the network environment and get the initial network
-        self.network = self.network_env.reset()
+        # TODO: Temporary fix to make sure we generate a valid graph where every node is connected. 
+        while True: 
+            # Create a new network environment for each episode
+            self.network_env = NetworkEnvironment(self.min_nodes, self.max_nodes, self.min_redundancy)
+            
+            # Reset the network environment and get the initial network
+            self.network = self.network_env.reset()
 
-        # Retrieve positions after reset
-        self.pos = self.network_env.get_positions() 
+            # Retrieve positions after reset
+            self.pos = self.network_env.get_positions() 
 
-        # Clear the previous spanning tree if it exists
-        if self.tree is not None:
-            self.tree.clear()
-        
-        # # Compute the Minimum Spanning Tree of the network using the weights
-        # self.tree = nx.minimum_spanning_tree(self.network, weight='weight')  
+            # Clear the previous spanning tree if it exists
+            if self.tree is not None:
+                self.tree.clear()
+            
+            # # Compute the Minimum Spanning Tree of the network using the weights
+            # self.tree = nx.minimum_spanning_tree(self.network, weight='weight')  
 
-        # Initialize an empty tree with the same nodes as the network
-        self.tree = nx.Graph()
-        self.tree.add_nodes_from(self.network.nodes(data=True))
-        
-        # Get the number of nodes in the current network
-        self.num_nodes = self.network_env.num_nodes
-        # Keep track of number of nodes in each env
-        self.num_nodes_history.append(self.num_nodes)
+            # Initialize an empty tree with the same nodes as the network
+            self.tree = nx.Graph()
+            self.tree.add_nodes_from(self.network.nodes(data=True))
+            
+            # Get the number of nodes in the current network
+            self.num_nodes = self.network_env.num_nodes
+            # Keep track of number of nodes in each env
+            self.num_nodes_history.append(self.num_nodes)
 
-        # Create the action mask 
-        self.action_mask = self.create_initial_action_mask(self.network, self.num_nodes)
+            # Create the action mask 
+            self.action_mask = self.create_initial_action_mask(self.network, self.num_nodes)
+
+            # Check if any node has no edges (i.e., if any row in the action mask is all zeros)
+            if np.any(np.sum(self.action_mask, axis=1) == 0):
+                # print("Detected a node with no edges, regenerating the network...")
+                continue  # Regenerate the graph if a node without edges is detected
+
+            # If the check passes, break the loop and proceed with the environment reset
+            break
 
         # Simulate attack
         self.simulate_attack()
@@ -344,10 +355,10 @@ class SpanningTreeEnv(gym.Env):
             spanning_tree_edge_mask[:actual_spanning_tree_edges.shape[0], 0] = 1 
 
         # Define first node choice mask (1 for nodes in the spanning tree, 0 otherwise)
-        first_node_action_mask = np.zeros(size, dtype=np.uint8)
+        self.first_node_action_mask = np.zeros(size, dtype=np.uint8)
         for node in self.tree.nodes():
             if self.tree.degree[node] > 0:  # Check if the node has any edges in the spanning tree
-                first_node_action_mask[node] = 1
+                self.first_node_action_mask[node] = 1
 
         return {
             "physical_node_features": physical_node_features,
@@ -359,7 +370,7 @@ class SpanningTreeEnv(gym.Env):
             "spanning_tree_edge_weights": spanning_tree_weights,
             "spanning_tree_edge_mask": spanning_tree_edge_mask,
             "action_mask": self.action_mask, 
-            "first_node_action_mask": first_node_action_mask,
+            "first_node_action_mask": self.first_node_action_mask,
         }
 
     def create_initial_action_mask(self, network, num_nodes):
@@ -368,8 +379,10 @@ class SpanningTreeEnv(gym.Env):
              # Only upper triangle needed for undirected graph
             for j in range(i + 1, num_nodes): 
                 if network.has_edge(i, j):
-                    # Upper triangle and symmetry entry stays 0
+                    # Upper triangle 
                     mask[i][j] = 1
+                    # Since undirected graph for now, keep matrix symmetrical. 
+                    mask[j][i] = 1
 
         return mask
 
@@ -384,6 +397,7 @@ class SpanningTreeEnv(gym.Env):
         if action == 'add':
             mask[node1][node2] = 0
             mask[node2][node1] = 0
+        # TODO: Make sure this maintains upper traingle
         elif action == 'remove' and network.has_edge(node1, node2):
             mask[node1][node2] = 1
             mask[node2][node1] = 1
@@ -425,6 +439,8 @@ class SpanningTreeEnv(gym.Env):
         # Keep track of the rewards for this episode
         self.ep_cumulative_reward += reward
 
+        obs = self.get_state()
+
         return self.get_state(), reward, done, truncated, {}
 
     def execute_action(self, action):
@@ -462,6 +478,25 @@ class SpanningTreeEnv(gym.Env):
         reward = -1  
         done = False
 
+        # Get the subgraph that only includes nodes with at least one edge
+        nodes_with_edges = [n for n in self.tree.nodes if self.tree.degree(n) > 0]
+        subgraph_with_edges = self.tree.subgraph(nodes_with_edges)
+
+        # Check if the subgraph with edges forms a tree
+        if not nx.is_tree(subgraph_with_edges):
+            # If a loop is detected, terminate the episode
+            done = True
+            reward = -100
+            return reward, done
+    
+        # Check if any attacked nodes are in the tree
+        attacked_nodes_in_tree = [n for n in self.attacked_nodes if n in subgraph_with_edges.nodes]
+        if attacked_nodes_in_tree:
+            # If an attacked node is part of the tree, terminate the episode
+            done = True
+            reward = -100
+            return reward, done
+           
         # # Penalty for connecting to attacked nodes
         # reward -= .1 * connected_to_attacked_node  
 
