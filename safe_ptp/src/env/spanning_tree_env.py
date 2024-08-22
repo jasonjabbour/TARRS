@@ -439,8 +439,6 @@ class SpanningTreeEnv(gym.Env):
         # Keep track of the rewards for this episode
         self.ep_cumulative_reward += reward
 
-        obs = self.get_state()
-
         return self.get_state(), reward, done, truncated, {}
 
     def execute_action(self, action):
@@ -487,11 +485,11 @@ class SpanningTreeEnv(gym.Env):
 
     def calculate_reward(self, valid_action, invalid_action, connected_to_attacked_node, disconnected_from_attacked_node):
         
-        reward = -1  
+        reward = 1  
         done = False
 
         if invalid_action:
-            reward -= 1
+            reward = -1
 
         # Get the subgraph that only includes nodes with at least one edge
         nodes_with_edges = [n for n in self.tree.nodes if self.tree.degree(n) > 0]
@@ -527,7 +525,7 @@ class SpanningTreeEnv(gym.Env):
                 # reward += 50 - 0.1 * tree_weight  
                 # # Stronger bonus for early completion
                 # reward += 0.5 * (self.max_ep_steps - self.current_step)  
-                reward = 0
+                reward = 100
                 done = True
                 return reward, done
 
