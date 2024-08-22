@@ -134,16 +134,16 @@ class GNNFeatureExtractor(BaseFeaturesExtractor):
             x_full = F.relu(x_full)
             x_full = self.gin_full2(x_full, undirected_valid_physical_indices)
             x_full = F.relu(x_full)
-            x_full = self.gin_full3(x_full, undirected_valid_physical_indices)
-            x_full = F.relu(x_full)
+            # x_full = self.gin_full3(x_full, undirected_valid_physical_indices)
+            # x_full = F.relu(x_full)
 
             # Color Refinement: Apply multiple GIN Layers with ReLU activation for spanning tree network
             x_mst = self.gin_mst1(nf_spanning, undirected_valid_spanning_indices)
             x_mst = F.relu(x_mst)
             x_mst = self.gin_mst2(x_mst, undirected_valid_spanning_indices)
             x_mst = F.relu(x_mst)
-            x_mst = self.gin_mst3(x_mst, undirected_valid_spanning_indices)
-            x_mst = F.relu(x_mst)
+            # x_mst = self.gin_mst3(x_mst, undirected_valid_spanning_indices)
+            # x_mst = F.relu(x_mst)
 
             # Store the original (non-flattened) features (for easy access later) [num nodes, embedding features]
             features_unflattened = torch.cat([x_full, x_mst], dim=-1)

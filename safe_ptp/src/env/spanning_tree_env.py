@@ -304,7 +304,7 @@ class SpanningTreeEnv(gym.Env):
         # Compute node features for physical network
         degrees = np.array([d for _, d in self.network.degree()], dtype=np.float32)
         clustering = np.array([c for _, c in nx.clustering(self.network).items()], dtype=np.float32)
-        eigenvector_centrality = np.array([e for _, e in nx.eigenvector_centrality(self.network, max_iter=1000).items()], dtype=np.float32)
+        eigenvector_centrality = np.array([e for _, e in nx.eigenvector_centrality_numpy(self.network).items()], dtype=np.float32)
         betweenness_centrality = np.array([b for _, b in nx.betweenness_centrality(self.network).items()], dtype=np.float32)
 
         for node in range(self.num_nodes):
@@ -336,7 +336,7 @@ class SpanningTreeEnv(gym.Env):
             # Compute node features for physical network
             degrees = np.array([d for _, d in self.tree.degree()], dtype=np.float32)
             clustering = np.array([c for _, c in nx.clustering(self.tree).items()], dtype=np.float32)
-            eigenvector_centrality = np.array([e for _, e in nx.eigenvector_centrality(self.tree, max_iter=1000).items()], dtype=np.float32)
+            eigenvector_centrality = np.array([e for _, e in nx.eigenvector_centrality_numpy(self.network).items()], dtype=np.float32)
             betweenness_centrality = np.array([b for _, b in nx.betweenness_centrality(self.tree).items()], dtype=np.float32)
 
             for node in range(self.num_nodes):
@@ -457,10 +457,22 @@ class SpanningTreeEnv(gym.Env):
             # Only allow adding edges since removing isn't an option
             if not self.tree.has_edge(node1, node2):
                 if self.network.has_edge(node1, node2):
-                    # Add the edge to the tree
+                    # Temporarily add the edge to check if it would create a valid tree
                     self.tree.add_edge(node1, node2, weight=self.network[node1][node2]['weight'])
-                    # Keep track of addition in mask
-                    self.update_action_mask(self.network, self.action_mask, node1, node2, 'add')
+                
+                    # Get the subgraph that only includes nodes with at least one edge
+                    nodes_with_edges = [n for n in self.tree.nodes if self.tree.degree(n) > 0]
+                    subgraph_with_edges = self.tree.subgraph(nodes_with_edges)
+
+                    # Check if the resulting graph is still a tree
+                    if nx.is_tree(subgraph_with_edges):
+                        valid_action = 1  # Mark this as a valid action
+                        # Keep track of addition in mask
+                        self.update_action_mask(self.network, self.action_mask, node1, node2, 'add')
+                    else:
+                        # If adding the edge would create a cycle, remove it
+                        self.tree.remove_edge(node1, node2)
+                        invalid_action = 1  # Mark this as an invalid action
 
         return valid_action, invalid_action, connected_to_attacked_node, disconnected_from_attacked_node
 
@@ -478,23 +490,25 @@ class SpanningTreeEnv(gym.Env):
         reward = -1  
         done = False
 
+        if invalid_action:
+            reward -= 1
+
         # Get the subgraph that only includes nodes with at least one edge
         nodes_with_edges = [n for n in self.tree.nodes if self.tree.degree(n) > 0]
         subgraph_with_edges = self.tree.subgraph(nodes_with_edges)
 
-        # Check if the subgraph with edges forms a tree
-        if not nx.is_tree(subgraph_with_edges):
-            # If a loop is detected, terminate the episode
-            done = True
-            reward = -100
-            return reward, done
+        # # Check if the subgraph with edges forms a tree
+        # if not nx.is_tree(subgraph_with_edges):
+        #     # If a loop is detected, terminate the episode
+        #     done = True
+        #     reward = -100
+        #     return reward, done
     
         # Check if any attacked nodes are in the tree
         attacked_nodes_in_tree = [n for n in self.attacked_nodes if n in subgraph_with_edges.nodes]
         if attacked_nodes_in_tree:
-            # If an attacked node is part of the tree, terminate the episode
+            reward -= 300
             done = True
-            reward = -100
             return reward, done
            
         # # Penalty for connecting to attacked nodes

@@ -155,7 +155,7 @@ def main():
                                                min_redundancy=MIN_REDUNDANCY, 
                                                start_difficulty_level=START_DIFFICULTY_LEVEL, 
                                                final_difficulty_level=FINAL_DIFFICULTY_LEVEL,
-                                               render_mode=True, 
+                                               render_mode=False, 
                                                show_weight_labels=SHOW_WEIGHT_LABELS), 
                                                n_envs=n_envs)
 

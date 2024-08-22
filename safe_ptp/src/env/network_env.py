@@ -243,7 +243,8 @@ class NetworkEnvironment:
                 
                 return self.network
             except Exception as e:
-                print(f"Error in creating network: {e}. Retrying...")
+                # print(f"Error in creating network: {e}. Retrying...")
+                pass
     
     def visualize_network(self, G, pos, add_edge_labels=False, title="Network Visualization"):
         """
