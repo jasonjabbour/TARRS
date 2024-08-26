@@ -44,7 +44,7 @@ def select_malicious_nodes(tree, leader_node, num_malicious=1):
         potential_malicious = [node for node in tree.nodes if node != leader_node and list(tree.successors(node))]
         if potential_malicious:
             malicious_node = random.choice(potential_malicious)
-            tree.nodes[malicious_node]['malicious'] = True
+            tree.nodes[malicious_node]['is_malicious'] = True
             tree.nodes[malicious_node]['time'] = random.uniform(1, 1000)  # Assign an incorrect time
             malicious_nodes.append(malicious_node)
     return malicious_nodes
@@ -52,7 +52,11 @@ def select_malicious_nodes(tree, leader_node, num_malicious=1):
 def assign_initial_clock_attributes(tree, leader_node):
     nx.set_node_attributes(tree, leader_node, 'leader')
     for node in tree.nodes:
-        tree.nodes[node]['has_malicious_ancestor'] = False  # Initialize the attribute
+        # Initialize the attribute for all nodes
+        tree.nodes[node]['has_malicious_ancestor'] = False
+        tree.nodes[node]['is_malicious'] = False
+        # Susceptibility to attack ratio that will determine how bad an attack influences this node
+        tree.nodes[node]['susceptibility'] = random.uniform(0.1, 10) + random.uniform(1, 1000)*random.randint(0, 1)
         if node == leader_node:
             tree.nodes[node]['time'] = 0  # Leader clock starts at 0
             tree.nodes[node]['drift'] = random.uniform(0.000001, 0.00001)  # Very small drift
@@ -67,7 +71,7 @@ def assign_initial_clock_attributes(tree, leader_node):
         
     return tree
 
-def assign_boundary_clocks(tree, leader_node, boundary_clock_ratio=0.1, hops_away_ratio=3):
+def assign_boundary_clocks(tree, leader_node, boundary_clock_ratio=0.5, hops_away_ratio=3):
     boundary_clocks = set()
     for node in tree.nodes:
         if node != leader_node and tree.nodes[node]['type'] == 'transparent':
@@ -93,11 +97,18 @@ def find_boundary_clock_ancestor(node, tree, boundary_clocks):
             return ancestor
     return None
     
+def is_boundary_clock_below_malicious(tree, malicious_ancestor, boundary_ancestor):
+    """Check if the boundary clock ancestor is below the malicious ancestor."""
+    if malicious_ancestor and boundary_ancestor:
+        # Check if the boundary clock ancestor is a descendant of the malicious ancestor
+        if nx.has_path(tree, malicious_ancestor, boundary_ancestor):
+            return True
+
+    return False
 
 def simulate_ptp_sync(tree, leader_node, boundary_clocks, malicious_nodes, sync_interval=5, steps=100, visualize_callback=None):
     
     for step in range(steps):
-        count = 0
         for node in tree.nodes:
             if node != leader_node:
                 parent = list(tree.predecessors(node))
@@ -106,17 +117,23 @@ def simulate_ptp_sync(tree, leader_node, boundary_clocks, malicious_nodes, sync_
 
                     # Check if the parent or any ancestor is malicious
                     malicious_ancestor = find_malicious_ancestor(node, tree, malicious_nodes)
+                    # Determine which node to synchronize to
+                    boundary_clock_ancestor = find_boundary_clock_ancestor(node, tree, boundary_clocks)
+                    # See if the boundary clock is closer ancester than malicious ancestor
+                    is_boundary_closer_ancestor = is_boundary_clock_below_malicious(tree, malicious_ancestor, boundary_clock_ancestor)
+
+                    # Label the node as attacked
                     if malicious_ancestor and (node not in malicious_nodes):
-                        count+=1
+                        tree.nodes[node]['has_malicious_ancestor'] = True
+                    
+                    # Decide if attack impact should come from attacker or boundary clock
+                    if tree.nodes[node]['has_malicious_ancestor'] and (not is_boundary_closer_ancestor):
                         # Apply the malicious impact for the child node (consistent across steps)
-                        tree.nodes[node]['time'] = tree.nodes[malicious_ancestor]['time']
-                        tree.nodes[node]['has_malicious_ancestor'] = True  # Mark the node as having a malicious ancestor
+                        tree.nodes[node]['time'] = tree.nodes[node]['susceptibility']
                     elif node not in malicious_nodes:
                         # Standard drift
                         tree.nodes[node]['time'] += tree.nodes[node]['drift'] * sync_interval
                         
-                        # Determine which node to synchronize to
-                        boundary_clock_ancestor = find_boundary_clock_ancestor(node, tree, boundary_clocks)
                         if boundary_clock_ancestor:
                             # Synchronize with boundary clock
                             sync_target = boundary_clock_ancestor
