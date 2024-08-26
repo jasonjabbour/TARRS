@@ -45,6 +45,7 @@ class ClockSimulation:
         # Assign the malicious nodes
         self.select_malicious_nodes(num_malicious=2)
 
+        self.randomly_disconnect_nodes()
 
     # TODO: Move this to Network Environment Class
     def create_graph(self):
@@ -97,6 +98,22 @@ class ClockSimulation:
             self.graph.nodes[node]['hops'] = path_length 
             self.tree.nodes[node]['hops'] = path_length 
 
+    def randomly_disconnect_nodes(self, num_disconnections=1):
+        # Select nodes to disconnect
+        nodes_to_disconnect = random.sample(list(self.tree.nodes), num_disconnections)
+
+        for node in nodes_to_disconnect:
+            # Find the parent of the node (if any)
+            parents = list(self.tree.predecessors(node))
+            
+            # Disconnect the node from its parent
+            for parent in parents:
+                self.tree.remove_edge(parent, node)
+            
+            # Label the node as disconnected
+            self.tree.nodes[node]['disconnected'] = True
+            self.graph.nodes[node]['disconnected'] = True
+
     def select_malicious_nodes(self, num_malicious=1):
         """Select and configure malicious nodes."""
         malicious_nodes = []
@@ -122,6 +139,7 @@ class ClockSimulation:
             # Initialize the attribute for all nodes
             self.graph.nodes[node]['has_malicious_ancestor'] = False
             self.graph.nodes[node]['is_malicious'] = False
+            self.graph.nodes[node]['disconnected'] = False
             # Susceptibility to attack ratio that will determine how bad an attack influences this node
             self.graph.nodes[node]['susceptibility'] = random.uniform(0.1, 10) + random.uniform(1, 1000) * random.randint(0, 1)
             if node == self.leader_node:
@@ -179,8 +197,11 @@ class ClockSimulation:
             for node in self.tree.nodes:
                 if node != self.leader_node:
                     parent = list(self.tree.predecessors(node))
-                    if parent:
+                    if len(parent) > 0:
                         parent = parent[0]
+                        # If parent exists that means node is not disconnected
+                        self.graph.nodes[node]['disconnected'] = False
+                        self.tree.nodes[node]['disconnected'] = False
 
                         # Check if the parent or any ancestor is malicious
                         malicious_ancestor = self.find_malicious_ancestor(node)
@@ -205,8 +226,8 @@ class ClockSimulation:
 
                         elif node not in self.malicious_nodes:
                             # Standard drift
-                            self.tree.nodes[node]['time'] += self.tree.nodes[node]['drift'] * sync_interval
-                            self.graph.nodes[node]['time'] += self.tree.nodes[node]['drift'] * sync_interval
+                            # TODO: Should visualize the drift then synchronize
+                            self.simulate_drift(node, sync_interval)
 
                             if boundary_clock_ancestor:
                                 # Synchronize with boundary clock
@@ -219,20 +240,41 @@ class ClockSimulation:
                                 # Hop to the leader node
                                 hops = self.tree.nodes[node]['hops']
 
-                            # Simulate delay
-                            delay = random.uniform(0.01, 0.05) * hops
-                            # Offset calculation
-                            offset = self.tree.nodes[node]['time'] - (self.tree.nodes[sync_target]['time'] + delay)
-                            
-                            # Apply the offset correction
-                            self.tree.nodes[node]['time'] -= offset / 2  # Simulate gradual synchronization
-                            self.graph.nodes[node]['time'] -= offset / 2  # Simulate gradual synchronization
+                            # Synchronize node
+                            self.sync_clock(node, sync_target, hops)
 
+                    else:
+                        # No parent means disconnected
+                        self.graph.nodes[node]['disconnected'] = True
+                        self.tree.nodes[node]['disconnected'] = True
+
+                        # Let node drift away
+                        self.simulate_drift(node, sync_interval, scaling_ratio=1000)
+
+            print(self.get_total_desync_time())
             # Call the visualization function if provided
             if visualize_callback:
                 visualize_callback(self.tree, self.leader_node, self.boundary_clocks, self.malicious_nodes, step)
 
+    def sync_clock(self, node, sync_target, hops):
+        # Simulate delay
+        delay = random.uniform(0.01, 0.05) * hops
+        # Offset calculation
+        offset = self.tree.nodes[node]['time'] - (self.tree.nodes[sync_target]['time'] + delay)
 
+        # Apply the offset correction
+        self.tree.nodes[node]['time'] -= offset / 2  # Simulate gradual synchronization
+        self.graph.nodes[node]['time'] -= offset / 2  # Simulate gradual synchronization
+    
+    def simulate_drift(self, node, sync_interval, scaling_ratio=1):
+        self.tree.nodes[node]['time'] += self.tree.nodes[node]['drift'] * sync_interval * scaling_ratio
+        self.graph.nodes[node]['time'] += self.tree.nodes[node]['drift'] * sync_interval * scaling_ratio
+
+    def get_total_desync_time(self):
+        """Get the total time across all nodes in the tree."""
+        total_desync_time = sum(self.tree.nodes[node]['time'] for node in self.tree.nodes)
+        return total_desync_time
+    
     def visualize_sync(self, step, ax, pos, cmap, norm):
         """Visualize the current state of synchronization."""
         ax.clear()
@@ -243,6 +285,7 @@ class ClockSimulation:
         leader_nodes = [self.leader_node]
         malicious_nodes_list = [node for node in self.malicious_nodes]
         affected_nodes = [node for node in self.tree.nodes if (self.tree.nodes[node]['has_malicious_ancestor'] and (node not in self.malicious_nodes))]
+        disconnected_nodes = [node for node in self.tree.nodes if self.tree.nodes[node]['disconnected']]
 
         # Draw graph edges in light grey
         nx.draw_networkx_edges(self.graph, pos, ax=ax, edge_color='lightgrey', width=1.0)
@@ -273,6 +316,10 @@ class ClockSimulation:
         # Draw boundary nodes (triangles)
         nx.draw_networkx_nodes(self.tree, pos, nodelist=boundary_nodes, node_color='orange',
                                node_size=1500, ax=ax, node_shape='^', edgecolors='black', alpha=.6)
+        
+        # Draw disconnected nodes
+        nx.draw_networkx_nodes(self.tree, pos, nodelist=disconnected_nodes, node_color='black',
+                               node_size=2000, ax=ax, node_shape='p', alpha=.3)
 
         ax.set_title(f"Step {step}: Clock Synchronization Visualization")
         plt.pause(0.1)
@@ -304,11 +351,17 @@ if __name__ == '__main__':
         # Reconfigure the tree (keeping the same nodes and states)
         clock_sim.reconfigure_tree(randomize_weights=True)
 
+        # Select node to disconnect 
+        clock_sim.randomly_disconnect_nodes()
+
         # Simulate PTP synchronization and visualize the process live after reconfiguration
         clock_sim.simulate_ptp_sync(sync_interval=5, steps=50,
                                 visualize_callback=lambda t, l, b, m, s: clock_sim.visualize_sync(s, ax, pos, cmap, norm))
+        
 
-    plt.ioff()  # Disable interactive mode
+
+    # Disable interactive mode
+    plt.ioff()  
     plt.show()
 
 
