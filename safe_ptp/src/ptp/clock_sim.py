@@ -17,6 +17,36 @@ class ClockSimulation:
         self.boundary_clocks = set()
         self.malicious_nodes = []
 
+        # Create graph
+        self.create_graph()
+
+        # # Define the range for the number of nodes and redundancy
+        # min_nodes = 100
+        # max_nodes = 100
+        # min_redundancy = 3
+
+        # # Create the network environment with the specified parameters
+        # network_env = NetworkEnvironment(min_nodes, max_nodes, min_redundancy)
+        # # Generate and visualize the network
+        # self.graph = network_env.reset()
+
+        # Choose random leader node
+        self.leader_node = random.choice(list(self.graph.nodes))
+
+        # Assign initial clock attributes to nodes
+        self.assign_initial_clock_attributes()
+
+        # Build initial tree
+        self.reconfigure_tree()
+
+        # Assign the boundary clocks
+        self.assign_boundary_clocks()
+
+        # Assign the malicious nodes
+        self.select_malicious_nodes(num_malicious=2)
+
+
+    # TODO: Move this to Network Environment Class
     def create_graph(self):
         """Create the initial graph."""
         graph = nx.connected_caveman_graph(self.community_num, self.community_size)
@@ -44,15 +74,28 @@ class ClockSimulation:
 
         self.graph = graph
 
-    def reconfigure_tree(self):
+    def reconfigure_tree(self, randomize_weights=False):
         """Reconfigure the tree structure, preserving node states."""
+
+        # Option to randomize weights to get a different spanning tree
+        if randomize_weights:
+            for u, v, d in self.graph.edges(data=True):
+                d['weight'] = random.uniform(0.1, 1.0)  # Randomize weights between 0.1 and 1.0
+
         # Create minimum spanning tree (MST) and convert it to a directed tree with a root
         self.tree = nx.minimum_spanning_tree(self.graph, weight='weight')
-
-        if self.leader_node is None:
-            self.leader_node = random.choice(list(self.tree.nodes)) 
-
         self.tree = nx.bfs_tree(self.tree, self.leader_node)  # Convert the MST to a directed tree (DAG) rooted at the leader node
+
+        # Copy node attributes from the original graph to the tree
+        for node in self.tree.nodes:
+            self.tree.nodes[node].update(self.graph.nodes[node])
+
+        # Assign tree specific node features
+        for node in self.tree.nodes:
+            path_length = nx.shortest_path_length(self.tree, source=self.leader_node, target=node)
+            # Assign to both graph and tree
+            self.graph.nodes[node]['hops'] = path_length 
+            self.tree.nodes[node]['hops'] = path_length 
 
     def select_malicious_nodes(self, num_malicious=1):
         """Select and configure malicious nodes."""
@@ -61,31 +104,36 @@ class ClockSimulation:
             potential_malicious = [node for node in self.tree.nodes if node != self.leader_node and list(self.tree.successors(node))]
             if potential_malicious:
                 malicious_node = random.choice(potential_malicious)
+                # Set malicious attribute for both tree and graph node
                 self.tree.nodes[malicious_node]['is_malicious'] = True
-                self.tree.nodes[malicious_node]['time'] = random.uniform(1, 1000)  # Assign an incorrect time
+                self.graph.nodes[malicious_node]['is_malicious'] = True
+
+                # Set bad time for malicious node in both graph and tree
+                time = random.uniform(1, 1000)  # Assign an incorrect time
+                self.tree.nodes[malicious_node]['time'] = time
+                self.graph.nodes[malicious_node]['time'] = time
                 malicious_nodes.append(malicious_node)
         self.malicious_nodes = malicious_nodes
 
     def assign_initial_clock_attributes(self):
         """Assign initial clock attributes to nodes."""
-        nx.set_node_attributes(self.tree, self.leader_node, 'leader')
-        for node in self.tree.nodes:
+        nx.set_node_attributes(self.graph, self.leader_node, 'leader')
+        for node in self.graph.nodes:
             # Initialize the attribute for all nodes
-            self.tree.nodes[node]['has_malicious_ancestor'] = False
-            self.tree.nodes[node]['is_malicious'] = False
+            self.graph.nodes[node]['has_malicious_ancestor'] = False
+            self.graph.nodes[node]['is_malicious'] = False
             # Susceptibility to attack ratio that will determine how bad an attack influences this node
-            self.tree.nodes[node]['susceptibility'] = random.uniform(0.1, 10) + random.uniform(1, 1000) * random.randint(0, 1)
+            self.graph.nodes[node]['susceptibility'] = random.uniform(0.1, 10) + random.uniform(1, 1000) * random.randint(0, 1)
             if node == self.leader_node:
-                self.tree.nodes[node]['time'] = 0  # Leader clock starts at 0
-                self.tree.nodes[node]['drift'] = random.uniform(0.000001, 0.00001)  # Very small drift
-                self.tree.nodes[node]['hops'] = 0
-                self.tree.nodes[node]['type'] = 'leader'
+                self.graph.nodes[node]['time'] = 0  # Leader clock starts at 0
+                self.graph.nodes[node]['drift'] = random.uniform(0.000001, 0.00001)  # Very small drift
+                self.graph.nodes[node]['hops'] = 0
+                self.graph.nodes[node]['type'] = 'leader'
             else:
-                path_length = nx.shortest_path_length(self.tree, source=self.leader_node, target=node)
-                self.tree.nodes[node]['hops'] = path_length
-                self.tree.nodes[node]['time'] = random.uniform(0.1, 100)  # Initial desynchronization
-                self.tree.nodes[node]['drift'] = random.uniform(0.0001, 0.01)  # Random drift value
-                self.tree.nodes[node]['type'] = 'transparent'
+                self.graph.nodes[node]['hops'] = None # Tree has not been constructed yet
+                self.graph.nodes[node]['time'] = random.uniform(0.1, 100)  # Initial desynchronization
+                self.graph.nodes[node]['drift'] = random.uniform(0.0001, 0.01)  # Random drift value
+                self.graph.nodes[node]['type'] = 'transparent'
  
     def assign_boundary_clocks(self, boundary_clock_ratio=0.5, hops_away_ratio=3):
         """Assign boundary clocks based on specific criteria."""
@@ -95,8 +143,11 @@ class ClockSimulation:
                 # Ensure the node has children (is not a leaf node)
                 if random.random() < boundary_clock_ratio and self.tree.nodes[node]['hops'] >= hops_away_ratio and len(list(self.tree.successors(node))) > 0:
                     self.tree.nodes[node]['type'] = 'boundary'
-                    # Make it pretty accurate
-                    self.tree.nodes[node]['drift'] = random.uniform(0.000001, 0.00001)  # Very small drift
+                    self.graph.nodes[node]['type'] = 'boundary'
+                    # Make clock pretty accurate
+                    drift = random.uniform(0.000001, 0.00001) 
+                    self.tree.nodes[node]['drift'] = drift
+                    self.graph.nodes[node]['drift'] = drift
                     boundary_clocks.add(node)
         self.boundary_clocks = boundary_clocks
 
@@ -141,15 +192,22 @@ class ClockSimulation:
                         # Label the node as attacked
                         if malicious_ancestor and (node not in self.malicious_nodes):
                             self.tree.nodes[node]['has_malicious_ancestor'] = True
+                            self.graph.nodes[node]['has_malicious_ancestor'] = True
+                        else:
+                            self.tree.nodes[node]['has_malicious_ancestor'] = False
+                            self.graph.nodes[node]['has_malicious_ancestor'] = False
 
                         # Decide if attack impact should come from attacker or boundary clock
                         if self.tree.nodes[node]['has_malicious_ancestor'] and not is_boundary_closer_ancestor:
                             # Apply the malicious impact for the child node (consistent across steps)
                             self.tree.nodes[node]['time'] = self.tree.nodes[node]['susceptibility']
+                            self.graph.nodes[node]['time'] = self.tree.nodes[node]['susceptibility']
+
                         elif node not in self.malicious_nodes:
                             # Standard drift
                             self.tree.nodes[node]['time'] += self.tree.nodes[node]['drift'] * sync_interval
-                            
+                            self.graph.nodes[node]['time'] += self.tree.nodes[node]['drift'] * sync_interval
+
                             if boundary_clock_ancestor:
                                 # Synchronize with boundary clock
                                 sync_target = boundary_clock_ancestor
@@ -168,6 +226,7 @@ class ClockSimulation:
                             
                             # Apply the offset correction
                             self.tree.nodes[node]['time'] -= offset / 2  # Simulate gradual synchronization
+                            self.graph.nodes[node]['time'] -= offset / 2  # Simulate gradual synchronization
 
             # Call the visualization function if provided
             if visualize_callback:
@@ -185,8 +244,11 @@ class ClockSimulation:
         malicious_nodes_list = [node for node in self.malicious_nodes]
         affected_nodes = [node for node in self.tree.nodes if (self.tree.nodes[node]['has_malicious_ancestor'] and (node not in self.malicious_nodes))]
 
-        # Draw edges
-        nx.draw_networkx_edges(self.tree, pos, ax=ax, edge_color='grey', node_size=2000)
+        # Draw graph edges in light grey
+        nx.draw_networkx_edges(self.graph, pos, ax=ax, edge_color='lightgrey', width=1.0)
+
+        # Draw tree edges in black on top of the graph edges
+        nx.draw_networkx_edges(self.tree, pos, ax=ax, edge_color='black', width=1.0, node_size=2000)
 
         # Draw regular nodes (circles)
         nx.draw_networkx_nodes(self.tree, pos, nodelist=regular_nodes, node_color=[cmap(norm(self.tree.nodes[node]['time'])) for node in regular_nodes],
@@ -217,33 +279,9 @@ class ClockSimulation:
 
 # Main execution
 if __name__ == '__main__':
-    # # Define the range for the number of nodes and redundancy
-    # min_nodes = 100
-    # max_nodes = 100
-    # min_redundancy = 3
-
-    # # Create the network environment with the specified parameters
-    # network_env = NetworkEnvironment(min_nodes, max_nodes, min_redundancy)
-    # # Generate and visualize the network
-    # graph = network_env.reset()
 
     # Create a PTP Simulation instance
     clock_sim = ClockSimulation()
-
-    # Create graph
-    clock_sim.create_graph()
-
-    # Create minimum spanning tree (MST) and convert it to a directed tree with a root
-    clock_sim.reconfigure_tree()
-
-    # Assign initial clock attributes
-    clock_sim.assign_initial_clock_attributes()
-
-    # Assign boundary clocks
-    clock_sim.assign_boundary_clocks()
-
-    # Select malicious nodes
-    clock_sim.select_malicious_nodes(num_malicious=2)
 
     # Get positions for the original graph
     pos = nx.spring_layout(clock_sim.graph)
@@ -253,28 +291,25 @@ if __name__ == '__main__':
     fig, ax = plt.subplots(figsize=(12, 12))
 
     # Set up colormap normalization without considering malicious nodes
-    valid_times = [clock_sim.tree.nodes[node]['time'] for node in clock_sim.tree.nodes if node not in clock_sim.malicious_nodes]
     norm = mcolors.Normalize(vmin=0, vmax=10)
     cmap = plt.cm.Reds  # Use the 'Reds' colormap for heatmap effect
 
     # Simulate PTP synchronization and visualize the process live
-    clock_sim.simulate_ptp_sync(sync_interval=5, steps=500,
+    clock_sim.simulate_ptp_sync(sync_interval=5, steps=50,
                               visualize_callback=lambda t, l, b, m, s: clock_sim.visualize_sync(s, ax, pos, cmap, norm))
+
+    # You can also reconfigure the graph
+    num_reconfigurations = 10
+    for _ in range(num_reconfigurations):
+        # Reconfigure the tree (keeping the same nodes and states)
+        clock_sim.reconfigure_tree(randomize_weights=True)
+
+        # Simulate PTP synchronization and visualize the process live after reconfiguration
+        clock_sim.simulate_ptp_sync(sync_interval=5, steps=50,
+                                visualize_callback=lambda t, l, b, m, s: clock_sim.visualize_sync(s, ax, pos, cmap, norm))
 
     plt.ioff()  # Disable interactive mode
     plt.show()
-
-    # print("HIIIIIIIIIIIIIIIIIIIIIIIII")
-
-    # # Reconfigure the tree (keeping the same nodes and states)
-    # clock_sim.reconfigure_tree()
-
-    # # Simulate PTP synchronization and visualize the process live after reconfiguration
-    # clock_sim.simulate_ptp_sync(sync_interval=5, steps=500,
-    #                           visualize_callback=lambda t, l, b, m, s: clock_sim.visualize_sync(s, ax, pos, cmap, norm))
-
-    # plt.ioff()  # Disable interactive mode
-    # plt.show()
 
 
 
