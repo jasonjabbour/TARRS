@@ -251,7 +251,6 @@ class ClockSimulation:
                         # Let node drift away
                         self.simulate_drift(node, sync_interval, scaling_ratio=1000)
 
-            print(self.get_total_desync_time())
             # Call the visualization function if provided
             if visualize_callback:
                 visualize_callback(self.tree, self.leader_node, self.boundary_clocks, self.malicious_nodes, step)
@@ -358,8 +357,6 @@ if __name__ == '__main__':
         clock_sim.simulate_ptp_sync(sync_interval=5, steps=50,
                                 visualize_callback=lambda t, l, b, m, s: clock_sim.visualize_sync(s, ax, pos, cmap, norm))
         
-
-
     # Disable interactive mode
     plt.ioff()  
     plt.show()
