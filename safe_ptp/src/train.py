@@ -15,10 +15,10 @@ from safe_ptp.src.alg.custom_gcn_policy import CustomGNNActorCriticPolicy
 from safe_ptp.src.alg.custom_gcn_policy_static import CustomGNNActorCriticPolicyStatic
 
 
-START_DIFFICULTY_LEVEL = 46
-FINAL_DIFFICULTY_LEVEL = 46
-MIN_NODES = 50
-MAX_NODES = 50
+START_DIFFICULTY_LEVEL = 16
+FINAL_DIFFICULTY_LEVEL = 16
+MIN_NODES = 20
+MAX_NODES = 20
 MIN_REDUNDANCY = 3
 TRAINING_MODE = True
 RENDER_EVAL_ENV = False

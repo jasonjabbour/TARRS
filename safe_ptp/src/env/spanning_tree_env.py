@@ -316,6 +316,7 @@ class SpanningTreeEnv(gym.Env):
         # Compute the Minimum Spanning Tree of the network using the weights
         self.tree = nx.minimum_spanning_tree(self.network, weight='weight')  
 
+
         # Simulate attack
         self.simulate_attack()
 
@@ -523,6 +524,40 @@ class SpanningTreeEnv(gym.Env):
 
         return valid_action, invalid_action, connected_to_attacked_node, disconnected_from_attacked_node
 
+
+    # def execute_action(self, action):
+    #     # Decode the one-hot encoded node vectors
+    #     node1, node2 = action
+
+    #     valid_action = 0
+    #     invalid_action = 0
+    #     connected_to_attacked_node = 0
+    #     disconnected_from_attacked_node = 0  # This may not be needed if removing is not allowed
+
+    #     # Ensure the nodes are within the current graph's bounds and node1 is not the same as node2
+    #     if node1 < self.num_nodes and node2 < self.num_nodes and node1 != node2:
+    #         # Only allow adding edges since removing isn't an option
+    #         if not self.tree.has_edge(node1, node2):
+    #             if self.network.has_edge(node1, node2):
+    #                 # Temporarily add the edge to check if it would create a valid tree
+    #                 self.tree.add_edge(node1, node2, weight=self.network[node1][node2]['weight'])
+                
+    #                 # Get the subgraph that only includes nodes with at least one edge
+    #                 nodes_with_edges = [n for n in self.tree.nodes if self.tree.degree(n) > 0]
+    #                 subgraph_with_edges = self.tree.subgraph(nodes_with_edges)
+
+    #                 # Check if the resulting graph is still a tree
+    #                 if nx.is_tree(subgraph_with_edges):
+    #                     valid_action = 1  # Mark this as a valid action
+    #                     # Keep track of addition in mask
+    #                     self.update_action_mask(self.network, self.action_mask, node1, node2, 'add')
+    #                 else:
+    #                     # If adding the edge would create a cycle, remove it
+    #                     self.tree.remove_edge(node1, node2)
+    #                     invalid_action = 1  # Mark this as an invalid action
+
+    #     return valid_action, invalid_action, connected_to_attacked_node, disconnected_from_attacked_node
+
     def decode_action(self, action):
         node1 = np.argmax(action[0])  # Assuming action[0] is the one-hot vector for node1
         node2 = np.argmax(action[1])  # Assuming action[1] is the one-hot vector for node2
@@ -562,7 +597,54 @@ class SpanningTreeEnv(gym.Env):
             reward = 10  # Large positive reward for completing the task
             done = True
 
+        # if invalid_action:
+        #     reward = -1
+
+        # # Get the subgraph that only includes nodes with at least one edge
+        # nodes_with_edges = [n for n in self.tree.nodes if self.tree.degree(n) > 0]
+        # subgraph_with_edges = self.tree.subgraph(nodes_with_edges)
+
+        # # Check if the subgraph with edges forms a tree
+        # if not nx.is_tree(subgraph_with_edges):
+        #     # If a loop is detected, terminate the episode
+        #     done = True
+        #     reward = -100
+        #     return reward, done
+    
+        # # Check if any attacked nodes are in the tree
+        # attacked_nodes_in_tree = [n for n in self.attacked_nodes if n in subgraph_with_edges.nodes]
+        # if attacked_nodes_in_tree:
+        #     reward -= 300
+        #     done = True
+        #     return reward, done
+           
+        # # Penalty for connecting to attacked nodes
+        # reward -= .1 * connected_to_attacked_node  
+
+        # # Reduced reward for disconnecting attacked nodes
+        # reward += 0.05 * disconnected_from_attacked_node  
+
+        # all_isolated = self.is_attacked_isolated()
+
+        # if all_isolated:
+        #     reward = -.01
+        #     non_attacked_subgraph = self.tree.subgraph([n for n in self.tree.nodes if n not in self.attacked_nodes])
+        #     if nx.is_tree(non_attacked_subgraph) and nx.is_connected(non_attacked_subgraph):
+        #         # tree_weight = sum(data['weight'] for u, v, data in non_attacked_subgraph.edges(data=True))
+        #         # # Major reward for completing the main objective
+        #         # reward += 50 - 0.1 * tree_weight  
+        #         # # Stronger bonus for early completion
+        #         # reward += 0.5 * (self.max_ep_steps - self.current_step)  
+        #         reward = 5
+        #         done = True
+        #         return reward, done
+
+        # # # Terminate the episode if no more valid actions are possible
+        # # if not self.action_mask.any():
+        # #     done = True  
+            
         return reward, done
+
 
     def is_attacked_isolated(self):
         # Check each attacked node to see if it is completely isolated
@@ -625,13 +707,13 @@ class SpanningTreeEnv(gym.Env):
 # Example usage
 if __name__ == "__main__":
     # Create the SpanningTreeEnv environment
-    env = SpanningTreeEnv(min_nodes=6, 
-                          max_nodes=6, 
+    env = SpanningTreeEnv(min_nodes=5, 
+                          max_nodes=5, 
                           min_redundancy=3, 
                           min_attacked_nodes=1, 
                           max_attacked_nodes=2,
-                          start_difficulty_level=2,
-                          final_difficulty_level=2,
+                          start_difficulty_level=1,
+                          final_difficulty_level=1,
                           num_timestep_cooldown=2, 
                           show_weight_labels=SHOW_WEIGHT_LABELS, 
                           render_mode=True, 
