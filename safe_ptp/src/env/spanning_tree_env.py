@@ -114,7 +114,13 @@ class SpanningTreeEnv(gym.Env):
         # self.action_space = spaces.Tuple((one_hot_action_space, one_hot_action_space))
 
         # Adjusting the action space to be two discrete spaces using MultiDiscrete
-        self.action_space = spaces.MultiDiscrete([self.max_difficulty_num_nodes, self.max_difficulty_num_nodes])
+        # self.action_space = spaces.MultiDiscrete([self.max_difficulty_num_nodes, self.max_difficulty_num_nodes])
+
+        # Define the maximum number of edges in the graph (upper triangle only)
+        max_edges = int(self.max_difficulty_num_nodes * (self.max_difficulty_num_nodes - 1) / 2)
+
+        # Action space where each action is a binary decision (0 or 1) for every possible edge
+        self.action_space = spaces.MultiBinary(max_edges)
 
         # # Create low and high arrays with the same shape as the node features
         # low = np.zeros((self.max_difficulty_num_nodes, 2), dtype=np.int32)  
@@ -167,6 +173,35 @@ class SpanningTreeEnv(gym.Env):
 
         # Set of nodes that are attacked
         self.attacked_nodes = set()  
+
+        # TODO: Temporary fix to make sure we generate a valid graph where every node is connected. 
+        while True:
+            # Create Physical network that will not change for the full duration of training!
+            # TODO: Save this out so you can run inference on the same physical network
+            # Create a new network environment for each episode
+            self.network_env = NetworkEnvironment(self.min_nodes, self.max_nodes, self.min_redundancy)
+            
+            # Reset the network environment and get the initial network
+            self.network = self.network_env.reset()
+
+            # Retrieve positions after reset
+            self.pos = self.network_env.get_positions() 
+
+            # Get the number of nodes in the current network
+            self.num_nodes = self.network_env.num_nodes
+            # Keep track of number of nodes in each env
+            self.num_nodes_history.append(self.num_nodes)
+
+            # Create the action mask 
+            self.action_mask = self.create_initial_action_mask(self.network, self.num_nodes)
+
+            # Check if any node has no edges (i.e., if any row in the action mask is all zeros)
+            if np.any(np.sum(self.action_mask, axis=1) == 0):
+                # print("Detected a node with no edges, regenerating the network...")
+                continue  # Regenerate the graph if a node without edges is detected
+
+            # If the check passes, break the loop and proceed with the environment reset
+            break
 
         if render_mode: 
             # Set up the Tkinter root window
@@ -235,43 +270,51 @@ class SpanningTreeEnv(gym.Env):
         # Reset timestep
         self.current_step = 0 
 
-        # TODO: Temporary fix to make sure we generate a valid graph where every node is connected. 
-        while True: 
-            # Create a new network environment for each episode
-            self.network_env = NetworkEnvironment(self.min_nodes, self.max_nodes, self.min_redundancy)
+        # # TODO: Temporary fix to make sure we generate a valid graph where every node is connected. 
+        # while True: 
+        #     # Create a new network environment for each episode
+        #     self.network_env = NetworkEnvironment(self.min_nodes, self.max_nodes, self.min_redundancy)
             
-            # Reset the network environment and get the initial network
-            self.network = self.network_env.reset()
+        #     # Reset the network environment and get the initial network
+        #     self.network = self.network_env.reset()
 
-            # Retrieve positions after reset
-            self.pos = self.network_env.get_positions() 
+        #     # Retrieve positions after reset
+        #     self.pos = self.network_env.get_positions() 
 
-            # Clear the previous spanning tree if it exists
-            if self.tree is not None:
-                self.tree.clear()
+        #     # Clear the previous spanning tree if it exists
+        #     if self.tree is not None:
+        #         self.tree.clear()
             
-            # # Compute the Minimum Spanning Tree of the network using the weights
-            # self.tree = nx.minimum_spanning_tree(self.network, weight='weight')  
+        #     # # Compute the Minimum Spanning Tree of the network using the weights
+        #     # self.tree = nx.minimum_spanning_tree(self.network, weight='weight')  
 
-            # Initialize an empty tree with the same nodes as the network
-            self.tree = nx.Graph()
-            self.tree.add_nodes_from(self.network.nodes(data=True))
+        #     # Initialize an empty tree with the same nodes as the network
+        #     self.tree = nx.Graph()
+        #     self.tree.add_nodes_from(self.network.nodes(data=True))
             
-            # Get the number of nodes in the current network
-            self.num_nodes = self.network_env.num_nodes
-            # Keep track of number of nodes in each env
-            self.num_nodes_history.append(self.num_nodes)
+        #     # Get the number of nodes in the current network
+        #     self.num_nodes = self.network_env.num_nodes
+        #     # Keep track of number of nodes in each env
+        #     self.num_nodes_history.append(self.num_nodes)
 
-            # Create the action mask 
-            self.action_mask = self.create_initial_action_mask(self.network, self.num_nodes)
+        #     # Create the action mask 
+        #     self.action_mask = self.create_initial_action_mask(self.network, self.num_nodes)
 
-            # Check if any node has no edges (i.e., if any row in the action mask is all zeros)
-            if np.any(np.sum(self.action_mask, axis=1) == 0):
-                # print("Detected a node with no edges, regenerating the network...")
-                continue  # Regenerate the graph if a node without edges is detected
+        #     # Check if any node has no edges (i.e., if any row in the action mask is all zeros)
+        #     if np.any(np.sum(self.action_mask, axis=1) == 0):
+        #         # print("Detected a node with no edges, regenerating the network...")
+        #         continue  # Regenerate the graph if a node without edges is detected
 
-            # If the check passes, break the loop and proceed with the environment reset
-            break
+        #     # If the check passes, break the loop and proceed with the environment reset
+        #     break
+
+
+        # Clear the previous spanning tree if it exists
+        if self.tree is not None:
+            self.tree.clear()
+        
+        # Compute the Minimum Spanning Tree of the network using the weights
+        self.tree = nx.minimum_spanning_tree(self.network, weight='weight')  
 
         # Simulate attack
         self.simulate_attack()
@@ -442,35 +485,41 @@ class SpanningTreeEnv(gym.Env):
         return self.get_state(), reward, done, truncated, {}
 
     def execute_action(self, action):
-        # Decode the one-hot encoded node vectors
-        node1, node2 = action
-
         valid_action = 0
         invalid_action = 0
         connected_to_attacked_node = 0
-        disconnected_from_attacked_node = 0  # This may not be needed if removing is not allowed
+        disconnected_from_attacked_node = 0  # Optional for removals
 
-        # Ensure the nodes are within the current graph's bounds and node1 is not the same as node2
-        if node1 < self.num_nodes and node2 < self.num_nodes and node1 != node2:
-            # Only allow adding edges since removing isn't an option
-            if not self.tree.has_edge(node1, node2):
-                if self.network.has_edge(node1, node2):
-                    # Temporarily add the edge to check if it would create a valid tree
-                    self.tree.add_edge(node1, node2, weight=self.network[node1][node2]['weight'])
+        # Iterate over all possible edges by looping through node pairs
+        action_index = 0  # To keep track of the current position in the action list
+        for node1 in range(self.num_nodes):
+            for node2 in range(node1 + 1, self.num_nodes):  # Ensure we only check each edge once (node1 < node2)
                 
-                    # Get the subgraph that only includes nodes with at least one edge
-                    nodes_with_edges = [n for n in self.tree.nodes if self.tree.degree(n) > 0]
-                    subgraph_with_edges = self.tree.subgraph(nodes_with_edges)
+                # If the action for this edge is 1 (i.e., the agent wants to add the edge)
+                if action[action_index] == 1:
+                    if not self.tree.has_edge(node1, node2):
+                        if self.network.has_edge(node1, node2):
+                            # Add the edge to the spanning tree
+                            self.tree.add_edge(node1, node2, weight=self.network[node1][node2]['weight'])
+                            self.update_action_mask(self.network, self.action_mask, node1, node2, 'add')
 
-                    # Check if the resulting graph is still a tree
-                    if nx.is_tree(subgraph_with_edges):
-                        valid_action = 1  # Mark this as a valid action
-                        # Keep track of addition in mask
-                        self.update_action_mask(self.network, self.action_mask, node1, node2, 'add')
-                    else:
-                        # If adding the edge would create a cycle, remove it
-                        self.tree.remove_edge(node1, node2)
-                        invalid_action = 1  # Mark this as an invalid action
+                            # # Check if adding this edge creates a valid tree (i.e., no cycles)
+                            # subgraph_with_edges = self.tree.subgraph([n for n in self.tree.nodes if self.tree.degree(n) > 0])
+                            # if nx.is_tree(subgraph_with_edges):
+                            #     valid_action += 1  # Mark this as a valid action
+                            #     self.update_action_mask(self.network, self.action_mask, node1, node2, 'add')
+                            # else:
+                            #     # If adding the edge creates a cycle, remove it
+                            #     self.tree.remove_edge(node1, node2)
+                            #     invalid_action += 1  # Mark this as an invalid action
+
+                # Optionally, handle removing edges if allowed
+                elif action[action_index] == 0 and self.tree.has_edge(node1, node2):
+                    self.tree.remove_edge(node1, node2)
+                    self.update_action_mask(self.network, self.action_mask, node1, node2, 'remove')
+
+                # Increment the action index as we move through the list
+                action_index += 1
 
         return valid_action, invalid_action, connected_to_attacked_node, disconnected_from_attacked_node
 
@@ -485,56 +534,35 @@ class SpanningTreeEnv(gym.Env):
 
     def calculate_reward(self, valid_action, invalid_action, connected_to_attacked_node, disconnected_from_attacked_node):
         
-        reward = 1  
+        reward = -10  
         done = False
 
-        if invalid_action:
-            reward = -1
+        # Get the subgraph excluding attacked nodes
+        non_attacked_subgraph = self.tree.subgraph([n for n in self.tree.nodes if n not in self.attacked_nodes])
 
-        # Get the subgraph that only includes nodes with at least one edge
-        nodes_with_edges = [n for n in self.tree.nodes if self.tree.degree(n) > 0]
-        subgraph_with_edges = self.tree.subgraph(nodes_with_edges)
+        # Penalty for each step (negative reward)
+        reward -= 0.1  
 
-        # # Check if the subgraph with edges forms a tree
-        # if not nx.is_tree(subgraph_with_edges):
-        #     # If a loop is detected, terminate the episode
-        #     done = True
-        #     reward = -100
-        #     return reward, done
-    
-        # Check if any attacked nodes are in the tree
-        attacked_nodes_in_tree = [n for n in self.attacked_nodes if n in subgraph_with_edges.nodes]
-        if attacked_nodes_in_tree:
-            reward -= 300
-            done = True
-            return reward, done
-           
-        # # Penalty for connecting to attacked nodes
-        # reward -= .1 * connected_to_attacked_node  
+        # Check if the non-attacked subgraph is a tree and connected
+        is_tree = nx.is_tree(non_attacked_subgraph)
 
-        # # Reduced reward for disconnecting attacked nodes
-        # reward += 0.05 * disconnected_from_attacked_node  
+        # Reward reduction for nodes that are part of the tree (i.e., they have exactly 1 parent)
+        nodes_with_one_parent = len([n for n in non_attacked_subgraph.nodes if non_attacked_subgraph.degree(n) == 1])
 
+        # Gradually reduce the negative reward as more nodes form proper tree structures
+        reward += nodes_with_one_parent * 0.5
+
+        # Slightly reduce the negative reward if the attacked nodes are isolated
         all_isolated = self.is_attacked_isolated()
-
         if all_isolated:
-            non_attacked_subgraph = self.tree.subgraph([n for n in self.tree.nodes if n not in self.attacked_nodes])
-            if nx.is_tree(non_attacked_subgraph) and nx.is_connected(non_attacked_subgraph):
-                # tree_weight = sum(data['weight'] for u, v, data in non_attacked_subgraph.edges(data=True))
-                # # Major reward for completing the main objective
-                # reward += 50 - 0.1 * tree_weight  
-                # # Stronger bonus for early completion
-                # reward += 0.5 * (self.max_ep_steps - self.current_step)  
-                reward = 100
-                done = True
-                return reward, done
+            reward += 1  # Reduce negative reward for isolation of attacked nodes
 
-        # Terminate the episode if no more valid actions are possible
-        if not self.action_mask.any():
-            done = True  
-            
+        # Large positive reward if the non-attacked nodes form a connected tree and all attacked nodes are isolated
+        if all_isolated and is_tree:
+            reward = 10  # Large positive reward for completing the task
+            done = True
+
         return reward, done
-
 
     def is_attacked_isolated(self):
         # Check each attacked node to see if it is completely isolated

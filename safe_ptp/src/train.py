@@ -12,6 +12,7 @@ from stable_baselines3.common.logger import Logger
 
 from safe_ptp.src.env.spanning_tree_env import SpanningTreeEnv
 from safe_ptp.src.alg.custom_gcn_policy import CustomGNNActorCriticPolicy
+from safe_ptp.src.alg.custom_gcn_policy_static import CustomGNNActorCriticPolicyStatic
 
 
 START_DIFFICULTY_LEVEL = 46
@@ -80,7 +81,7 @@ def train(env, eval_env, total_timesteps, model_dir_base):
     print(f"Training on device: {device}")
 
     if ALGO == 'PPO':
-        model = PPO(CustomGNNActorCriticPolicy,
+        model = PPO(CustomGNNActorCriticPolicyStatic,
                     env, 
                     verbose=1, 
                     tensorboard_log="./tensorboard_logs/", 
@@ -89,7 +90,7 @@ def train(env, eval_env, total_timesteps, model_dir_base):
                     clip_range=0.1,
                     batch_size=64)
     elif ALGO == 'SAC':
-        model = SAC(CustomGNNActorCriticPolicy, 
+        model = SAC(CustomGNNActorCriticPolicyStatic, 
                     env, 
                     verbose=1, 
                     tensorboard_log="./tensorboard_logs/", 

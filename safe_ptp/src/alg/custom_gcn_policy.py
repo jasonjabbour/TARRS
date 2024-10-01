@@ -1,3 +1,5 @@
+"GCN Policy with two graphs: Physical Network and Spanning Tree Network"
+
 import torch
 from torch import nn
 from torch.optim import Adam
