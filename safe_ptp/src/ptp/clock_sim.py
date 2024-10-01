@@ -20,15 +20,15 @@ class ClockSimulation:
         # Create graph
         self.create_graph()
 
-        # # Define the range for the number of nodes and redundancy
-        # min_nodes = 100
-        # max_nodes = 100
-        # min_redundancy = 3
+        # Define the range for the number of nodes and redundancy
+        min_nodes = 100
+        max_nodes = 100
+        min_redundancy = 3
 
-        # # Create the network environment with the specified parameters
-        # network_env = NetworkEnvironment(min_nodes, max_nodes, min_redundancy)
-        # # Generate and visualize the network
-        # self.graph = network_env.reset()
+        # Create the network environment with the specified parameters
+        network_env = NetworkEnvironment(min_nodes, max_nodes, min_redundancy)
+        # Generate and visualize the network
+        self.graph = network_env.reset()
 
         # Choose random leader node
         self.leader_node = random.choice(list(self.graph.nodes))

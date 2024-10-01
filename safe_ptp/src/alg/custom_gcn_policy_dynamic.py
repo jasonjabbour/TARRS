@@ -9,9 +9,9 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.policies import ActorCriticPolicy
 
 
-class GNNFeatureExtractor(BaseFeaturesExtractor):
+class GNNFeatureExtractorDynamic(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim):
-        super(GNNFeatureExtractor, self).__init__(observation_space, features_dim)
+        super(GNNFeatureExtractorDynamic, self).__init__(observation_space, features_dim)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -167,12 +167,12 @@ class GNNFeatureExtractor(BaseFeaturesExtractor):
         return final_features, final_features_unflattened
 
 
-class CustomGNNActorCriticPolicy(ActorCriticPolicy):
+class CustomGNNActorCriticPolicyDynamic(ActorCriticPolicy):
     def __init__(self, observation_space, action_space, lr_schedule, features_dim=32, **kwargs):
         # Call the super constructor first
-        super(CustomGNNActorCriticPolicy, self).__init__(
+        super(CustomGNNActorCriticPolicyDynamic, self).__init__(
             observation_space, action_space, lr_schedule,
-            features_extractor_class=GNNFeatureExtractor,
+            features_extractor_class=GNNFeatureExtractorDynamic,
             features_extractor_kwargs={'features_dim': features_dim},
             **kwargs
         )

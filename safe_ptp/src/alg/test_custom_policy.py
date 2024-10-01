@@ -3,7 +3,7 @@ import time
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.policies import ActorCriticPolicy
 from safe_ptp.src.env.spanning_tree_env import SpanningTreeEnv
-from safe_ptp.src.alg.custom_gcn_policy import CustomGNNActorCriticPolicy
+from safe_ptp.safe_ptp.src.alg.custom_gcn_policy_dynamic import CustomGNNActorCriticPolicy
 
 
 if __name__ == "__main__":
