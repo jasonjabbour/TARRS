@@ -76,7 +76,7 @@ class ClockSimulation:
         graph = nx.connected_caveman_graph(self.community_num, self.community_size)
         count = 0
         p = 0.01
-
+            
         for (u, v) in graph.edges():
             if random.random() < p:  # rewire the edge
                 x = random.choice(list(graph.nodes))
@@ -100,14 +100,23 @@ class ClockSimulation:
     def reconfigure_tree(self, randomize_weights=False):
         """Reconfigure the tree structure, preserving node states."""
 
-        # Option to randomize weights to get a different spanning tree
-        if randomize_weights:
-            for u, v, d in self.graph.edges(data=True):
-                d['weight'] = random.uniform(0.1, 1.0)  # Randomize weights between 0.1 and 1.0
+        # Undirected graph for MST computation
+        undirected_graph = nx.Graph()  # Temporarily use an undirected graph
 
-        # Create minimum spanning tree (MST) and convert it to a directed tree with a root
-        self.tree = nx.minimum_spanning_tree(self.graph, weight='weight')
-        self.tree = nx.bfs_tree(self.tree, self.leader_node)  # Convert the MST to a directed tree (DAG) rooted at the leader node
+        # Copy nodes and edges from the graph to the undirected graph
+        undirected_graph.add_nodes_from(self.graph.nodes(data=True))
+        undirected_graph.add_edges_from(self.graph.edges(data=True))
+
+        # Option to randomize edge weights
+        if randomize_weights:
+            for u, v, d in undirected_graph.edges(data=True):
+                d['weight'] = random.uniform(0.1, 1.0)  # Randomize weights
+
+        # Compute the minimum spanning tree (MST) on the undirected graph
+        mst = nx.minimum_spanning_tree(undirected_graph, weight='weight')
+
+        # Convert the MST to a directed tree (DAG) using BFS rooted at the leader node
+        self.tree = nx.bfs_tree(mst, self.leader_node)
 
         # Copy node attributes from the original graph to the tree
         for node in self.tree.nodes:
@@ -116,12 +125,14 @@ class ClockSimulation:
         # Update node atributes after construction
         self.update_tree_attributes()
 
+
     def construct_tree_from_edge_vector(self, edge_vector):
         """
         Construct a directed tree from a given edge vector provided by the RL agent.
         The edge vector represents whether a directed edge exists between two nodes.
         """
         self.tree = nx.DiGraph()  # Directed graph (tree)
+        # This preserves the order of the nodes
         self.tree.add_nodes_from(self.graph.nodes(data=True))  # Add all nodes from the graph to the tree
 
         # Set to track which nodes already have a parent
@@ -174,6 +185,8 @@ class ClockSimulation:
 
             # Assign the hops value to the tree node attributes
             self.tree.nodes[node]['hops'] = path_length
+            # Assign the hops value to the graph node attributes
+            self.graph.nodes[node]['hops'] = path_length
 
     def randomly_disconnect_nodes(self, num_disconnections=1):
         # Select nodes to disconnect
@@ -323,6 +336,10 @@ class ClockSimulation:
                                 self.sync_clock(node, sync_target, hops)
                             # Node is not fully disconnected (has predecessors) but no clock to sync to
                             else:
+                                # Disconnected from a clock to sync from
+                                self.graph.nodes[node]['disconnected'] = True
+                                self.tree.nodes[node]['disconnected'] = True
+
                                 # Let node drift away
                                 self.simulate_drift(node, sync_interval, scaling_ratio=1000)
 
@@ -353,10 +370,94 @@ class ClockSimulation:
         self.graph.nodes[node]['time'] += self.tree.nodes[node]['drift'] * sync_interval * scaling_ratio
 
     def get_total_desync_time(self):
-        """Get the total time across all nodes in the tree."""
-        total_desync_time = sum(self.tree.nodes[node]['time'] for node in self.tree.nodes)
+        """Get the total time across all non-malicious nodes in the tree."""
+        
+        total_desync_time = 0  # Initialize total desync time
+
+        for node in self.tree.nodes:
+            # Check if the node is malicious
+            is_malicious = self.tree.nodes[node].get('is_malicious', False)
+
+            if not is_malicious:  # Only include non-malicious nodes
+                total_desync_time += self.tree.nodes[node]['time']
+        
         return total_desync_time
     
+    def get_state_features(self):
+        """Return a dictionary of state features for each node in the tree."""
+        
+        # Define a consistent dictionary for one-hot encoding the 'type'
+        type_dict = {
+            'leader': [1, 0, 0],
+            'transparent': [0, 1, 0],
+            'boundary': [0, 0, 1]
+        }
+
+        # Initialize the state features dictionary
+        state_features = {
+            'has_malicious_ancestor': [],
+            'is_malicious': [],
+            'disconnected': [],
+            'susceptibility': [],
+            'time': [],
+            'drift': [],
+            'hops': [],  # Adding hops
+            'type': [],
+            'node_id': [],
+        }
+
+        # Iterate over the nodes in the graph to ensure always refering to the same nodes orderwise
+        for node in self.graph.nodes:
+            # These node ids will be consistent across graphs even if in different order
+            state_features['node_id'].append(node)
+            # Convert booleans to 0 and 1
+            state_features['has_malicious_ancestor'].append(int(self.graph.nodes[node].get('has_malicious_ancestor', False)))
+            state_features['is_malicious'].append(int(self.graph.nodes[node].get('is_malicious', False)))
+            # Disconnected does not necessarily mean fully disconnected.
+            # Could have a clock to sync to but no path the leader in their own little subgraph.
+            state_features['disconnected'].append(int(self.graph.nodes[node].get('disconnected', False)))
+
+            # Append other attributes
+            state_features['susceptibility'].append(self.graph.nodes[node].get('susceptibility', 0.0))
+            state_features['time'].append(self.graph.nodes[node].get('time', 0.0))
+            state_features['drift'].append(self.graph.nodes[node].get('drift', 0.0))
+
+            # Get hops, use -1 if it's None
+            hops = self.graph.nodes[node].get('hops', None)
+            if hops is None:
+                hops = -1
+            state_features['hops'].append(hops)
+
+            # Use one-hot encoding for the 'type' field
+            node_type = self.graph.nodes[node].get('type', 'transparent')
+            state_features['type'].append(type_dict.get(node_type, [0, 1, 0]))  # Default to 'transparent'
+
+        return state_features
+    
+    def get_tree_edge_indices(self):
+        """
+        Return the edge indices of the tree as a NumPy array.
+        This will give the indices of all edges present in self.tree.
+        If a node has no outgoing edges, a self-loop is added.
+        """
+        edge_indices = []
+
+        # Iterate over all nodes in the tree
+        for node in self.tree.nodes:
+            has_outgoing_edges = False
+            
+            # Check for successors (outgoing edges)
+            for neighbor in self.tree.successors(node):
+                edge_indices.append([node, neighbor])  # Add the directed edge [node -> neighbor]
+                has_outgoing_edges = True
+            
+            # If no outgoing edges, add a self-loop
+            if not has_outgoing_edges:
+                edge_indices.append([node, node])  # Add self-loop [node -> node]
+
+        # Convert the edge list to a NumPy array and return
+        return np.array(edge_indices, dtype=np.int32)
+            
     def setup_render(self):
         """Set up the rendering environment, including the graph layout and plotting."""
         # Get positions for the original graph
@@ -374,7 +475,6 @@ class ClockSimulation:
         """Run simulation with rendering enabled."""
         self.simulate_ptp_sync(sync_interval=sync_interval, steps=steps,
                                visualize_callback=lambda s: self.visualize_sync(s))
-
 
     def visualize_sync(self, step):
         """Visualize the current state of synchronization."""

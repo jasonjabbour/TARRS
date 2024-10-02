@@ -34,6 +34,10 @@ def test_reconfiguring_tree_from_action():
     # Simulate PTP synchronization and visualize the process live
     clock_sim.simulate_and_render(sync_interval=5, steps=20)
 
+    print("Total Desync Time", clock_sim.get_total_desync_time())
+    # print(clock_sim.get_state_features())
+    # print(clock_sim.get_tree_edge_indices())
+
     # You can also reconfigure the graph
     num_reconfigurations = 10
     for _ in range(num_reconfigurations):
@@ -49,6 +53,10 @@ def test_reconfiguring_tree_from_action():
 
         # Simulate PTP synchronization and visualize the process live after reconfiguration
         clock_sim.simulate_and_render(sync_interval=5, steps=20)
+
+        print("Total Desync Time", clock_sim.get_total_desync_time())
+        # print(clock_sim.get_state_features())
+        # print(clock_sim.get_tree_edge_indices())
 
     clock_sim.finalize_render()
 
