@@ -8,7 +8,7 @@ import numpy as np
 from safe_ptp.src.env.network_env import NetworkEnvironment
 
 class ClockSimulation:
-    def __init__(self, community_size=10, community_num=10):
+    def __init__(self, community_size=10, community_num=10, render=False, seed=None):
         self.community_size = community_size
         self.community_num = community_num
         self.graph = None
@@ -16,6 +16,17 @@ class ClockSimulation:
         self.leader_node = None
         self.boundary_clocks = set()
         self.malicious_nodes = []
+        self.render = render
+        self.fig = None
+        self.ax = None
+        self.pos = None
+        self.cmap = None
+        self.norm = None
+        self.seed = seed  # Add seed to the constructor
+
+        # For reproducibility
+        if self.seed is not None:
+            self.set_seed(self.seed)
 
         # Create graph
         self.create_graph()
@@ -33,19 +44,31 @@ class ClockSimulation:
         # Choose random leader node
         self.leader_node = random.choice(list(self.graph.nodes))
 
+        # Reset the spanning tree and clock attributes
+        self.reset()
+
+        # Test removing nodes
+        # self.randomly_disconnect_nodes()
+
+        # Set up rendering if enabled
+        if self.render:
+            self.setup_render()
+
+    def set_seed(self, seed):
+        """Set the random seed for reproducibility."""
+        random.seed(seed)
+        np.random.seed(seed)
+        
+    def reset(self):
+        """Reset the simulation environment, keeping the physical graph static."""
         # Assign initial clock attributes to nodes
         self.assign_initial_clock_attributes()
-
         # Build initial tree
         self.reconfigure_tree()
-
         # Assign the boundary clocks
         self.assign_boundary_clocks()
-
         # Assign the malicious nodes
         self.select_malicious_nodes(num_malicious=2)
-
-        self.randomly_disconnect_nodes()
 
     # TODO: Move this to Network Environment Class
     def create_graph(self):
@@ -62,7 +85,6 @@ class ClockSimulation:
                 graph.remove_edge(u, v)
                 graph.add_edge(u, x)
                 count += 1
-        print('rewire:', count)
 
         n = graph.number_of_nodes()
         label = np.zeros((n, n), dtype=int)
@@ -91,12 +113,67 @@ class ClockSimulation:
         for node in self.tree.nodes:
             self.tree.nodes[node].update(self.graph.nodes[node])
 
-        # Assign tree specific node features
+        # Update node atributes after construction
+        self.update_tree_attributes()
+
+    def construct_tree_from_edge_vector(self, edge_vector):
+        """
+        Construct a directed tree from a given edge vector provided by the RL agent.
+        The edge vector represents whether a directed edge exists between two nodes.
+        """
+        self.tree = nx.DiGraph()  # Directed graph (tree)
+        self.tree.add_nodes_from(self.graph.nodes(data=True))  # Add all nodes from the graph to the tree
+
+        # Set to track which nodes already have a parent
+        node_parents = set()
+
+        edge_index = 0
+        for u, v in self.graph.edges():
+            # Handle both directions: u -> v and v -> u
+            u_to_v = edge_vector[edge_index] == 1
+            v_to_u = edge_vector[edge_index + 1] == 1
+            edge_index += 2  # Move index by 2 to account for both directions
+
+            if u_to_v and v_to_u:
+                # If both directions are selected, follow a rule (e.g., keep u -> v)
+                # Alternatively, you can randomize or apply other strategies here
+                u_to_v = True
+                v_to_u = False
+
+            # Only add u -> v if it's allowed and doesn't violate the tree structure
+            if u_to_v and v not in node_parents and not nx.has_path(self.tree, v, u):
+                self.tree.add_edge(u, v)
+                node_parents.add(v)
+
+            # Only add v -> u if it's allowed and doesn't violate the tree structure
+            if v_to_u and u not in node_parents and not nx.has_path(self.tree, u, v):
+                self.tree.add_edge(v, u)
+                node_parents.add(u)
+
+        # Update tree node attributes (e.g., hops from the leader)
+        self.update_tree_attributes()
+                
+        # # Check if the constructed graph is a valid directed acyclic tree (DAG)
+        # if not nx.is_directed_acyclic_graph(self.tree):
+        #     raise ValueError("Constructed graph is not a valid directed acyclic tree!")
+        # else:
+        #     print("Valid Tree")
+
+
+    def update_tree_attributes(self):
+        """Update tree node attributes such as hops."""
         for node in self.tree.nodes:
-            path_length = nx.shortest_path_length(self.tree, source=self.leader_node, target=node)
-            # Assign to both graph and tree
-            self.graph.nodes[node]['hops'] = path_length 
-            self.tree.nodes[node]['hops'] = path_length 
+            # Check if there's a path from the leader node to the current node
+            if nx.has_path(self.tree, self.leader_node, node):
+                # If a path exists, calculate the number of hops (shortest path length)
+                path_length = nx.shortest_path_length(self.tree, source=self.leader_node, target=node)
+            else:
+                # If no path exists to leader,
+                # Might not be completely disconnect. Could have predecessors
+                path_length = None
+
+            # Assign the hops value to the tree node attributes
+            self.tree.nodes[node]['hops'] = path_length
 
     def randomly_disconnect_nodes(self, num_disconnections=1):
         # Select nodes to disconnect
@@ -145,14 +222,13 @@ class ClockSimulation:
             if node == self.leader_node:
                 self.graph.nodes[node]['time'] = 0  # Leader clock starts at 0
                 self.graph.nodes[node]['drift'] = random.uniform(0.000001, 0.00001)  # Very small drift
-                self.graph.nodes[node]['hops'] = 0
                 self.graph.nodes[node]['type'] = 'leader'
             else:
-                self.graph.nodes[node]['hops'] = None # Tree has not been constructed yet
                 self.graph.nodes[node]['time'] = random.uniform(0.1, 100)  # Initial desynchronization
                 self.graph.nodes[node]['drift'] = random.uniform(0.0001, 0.01)  # Random drift value
                 self.graph.nodes[node]['type'] = 'transparent'
  
+
     def assign_boundary_clocks(self, boundary_clock_ratio=0.5, hops_away_ratio=3):
         """Assign boundary clocks based on specific criteria."""
         boundary_clocks = set()
@@ -168,7 +244,7 @@ class ClockSimulation:
                     self.graph.nodes[node]['drift'] = drift
                     boundary_clocks.add(node)
         self.boundary_clocks = boundary_clocks
-
+        
     def find_malicious_ancestor(self, node):
         """Find the closest malicious ancestor of a node."""
         for ancestor in nx.ancestors(self.tree, node):
@@ -229,19 +305,26 @@ class ClockSimulation:
                             # TODO: Should visualize the drift then synchronize
                             self.simulate_drift(node, sync_interval)
 
+                            # Sync to boundary clock ancestor if any
                             if boundary_clock_ancestor:
                                 # Synchronize with boundary clock
                                 sync_target = boundary_clock_ancestor
                                 # If synchronizing to the boundary clock don't add full hop penalty
                                 hops = nx.shortest_path_length(self.tree, source=sync_target, target=node)
-                            else:
+                                # Synchronize node
+                                self.sync_clock(node, sync_target, hops)
+                            # Sync to leader node if path exists
+                            elif nx.has_path(self.tree, self.leader_node, node):
                                 # Synchronize with leader
                                 sync_target = self.leader_node
                                 # Hop to the leader node
                                 hops = self.tree.nodes[node]['hops']
-
-                            # Synchronize node
-                            self.sync_clock(node, sync_target, hops)
+                                # Synchronize node
+                                self.sync_clock(node, sync_target, hops)
+                            # Node is not fully disconnected (has predecessors) but no clock to sync to
+                            else:
+                                # Let node drift away
+                                self.simulate_drift(node, sync_interval, scaling_ratio=1000)
 
                     else:
                         # No parent means disconnected
@@ -252,8 +335,8 @@ class ClockSimulation:
                         self.simulate_drift(node, sync_interval, scaling_ratio=1000)
 
             # Call the visualization function if provided
-            if visualize_callback:
-                visualize_callback(self.tree, self.leader_node, self.boundary_clocks, self.malicious_nodes, step)
+            if visualize_callback and self.render:
+                visualize_callback(step)
 
     def sync_clock(self, node, sync_target, hops):
         # Simulate delay
@@ -274,8 +357,33 @@ class ClockSimulation:
         total_desync_time = sum(self.tree.nodes[node]['time'] for node in self.tree.nodes)
         return total_desync_time
     
-    def visualize_sync(self, step, ax, pos, cmap, norm):
+    def setup_render(self):
+        """Set up the rendering environment, including the graph layout and plotting."""
+        # Get positions for the original graph
+        self.pos = nx.spring_layout(self.graph)
+
+        # Set up the plot
+        plt.ion()  # Enable interactive mode
+        self.fig, self.ax = plt.subplots(figsize=(12, 12))
+
+        # Set up colormap normalization without considering malicious nodes
+        self.norm = mcolors.Normalize(vmin=0, vmax=10)
+        self.cmap = plt.cm.Reds  # Use the 'Reds' colormap for heatmap effect
+
+    def simulate_and_render(self, sync_interval=5, steps=50):
+        """Run simulation with rendering enabled."""
+        self.simulate_ptp_sync(sync_interval=sync_interval, steps=steps,
+                               visualize_callback=lambda s: self.visualize_sync(s))
+
+
+    def visualize_sync(self, step):
         """Visualize the current state of synchronization."""
+
+        ax = self.ax
+        pos = self.pos
+        cmap = self.cmap
+        norm = self.norm
+
         ax.clear()
 
         # Separate nodes by type
@@ -323,26 +431,20 @@ class ClockSimulation:
         ax.set_title(f"Step {step}: Clock Synchronization Visualization")
         plt.pause(0.1)
 
+    def finalize_render(self):
+        """Finalize rendering by disabling interactive mode and showing the plot."""
+        plt.ioff()  # Disable interactive mode
+        plt.show()  # Display the final plot when the simulation is complete
+
+
 # Main execution
 if __name__ == '__main__':
 
     # Create a PTP Simulation instance
-    clock_sim = ClockSimulation()
-
-    # Get positions for the original graph
-    pos = nx.spring_layout(clock_sim.graph)
-
-    # Set up the plot
-    plt.ion()  # Enable interactive mode
-    fig, ax = plt.subplots(figsize=(12, 12))
-
-    # Set up colormap normalization without considering malicious nodes
-    norm = mcolors.Normalize(vmin=0, vmax=10)
-    cmap = plt.cm.Reds  # Use the 'Reds' colormap for heatmap effect
+    clock_sim = ClockSimulation(render=True, seed=40)
 
     # Simulate PTP synchronization and visualize the process live
-    clock_sim.simulate_ptp_sync(sync_interval=5, steps=50,
-                              visualize_callback=lambda t, l, b, m, s: clock_sim.visualize_sync(s, ax, pos, cmap, norm))
+    clock_sim.simulate_and_render(sync_interval=5, steps=50)
 
     # You can also reconfigure the graph
     num_reconfigurations = 10
@@ -354,12 +456,9 @@ if __name__ == '__main__':
         clock_sim.randomly_disconnect_nodes()
 
         # Simulate PTP synchronization and visualize the process live after reconfiguration
-        clock_sim.simulate_ptp_sync(sync_interval=5, steps=50,
-                                visualize_callback=lambda t, l, b, m, s: clock_sim.visualize_sync(s, ax, pos, cmap, norm))
-        
-    # Disable interactive mode
-    plt.ioff()  
-    plt.show()
+        clock_sim.simulate_and_render(sync_interval=5, steps=50)
+
+    clock_sim.finalize_render()
 
 
 
