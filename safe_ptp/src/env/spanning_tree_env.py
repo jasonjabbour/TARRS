@@ -211,15 +211,17 @@ class SpanningTreeEnv(gym.Env):
         # Get the features from the clock simulation environment
         state_features = self.clock_sim.get_state_features()
 
+        scaling_factor = 0.001
+
         # Now, we need to map the state_features into node_features for our environment
         for i in range(self.num_physical_nodes):
             # Fill node features from the state features:
             node_features[i, 0] = state_features['has_malicious_ancestor'][i]
             node_features[i, 1] = state_features['is_malicious'][i]
             node_features[i, 2] = state_features['disconnected'][i]
-            node_features[i, 3] = state_features['susceptibility'][i]
-            node_features[i, 4] = state_features['time'][i]
-            node_features[i, 5] = state_features['drift'][i]
+            node_features[i, 3] = state_features['susceptibility'][i]*scaling_factor
+            node_features[i, 4] = state_features['time'][i]*scaling_factor
+            node_features[i, 5] = state_features['drift'][i]*scaling_factor
             node_features[i, 6] = state_features['hops'][i]
 
             # For type, we split up the one-hot encoding
