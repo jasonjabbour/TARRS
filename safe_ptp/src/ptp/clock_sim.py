@@ -24,6 +24,9 @@ class ClockSimulation:
         self.norm = None
         self.seed = seed  # Add seed to the constructor
 
+        # Edge vector used to create the tree used as feedback for agent
+        self.validated_edge_vector = []
+
         # For reproducibility
         if self.seed is not None:
             self.set_seed(self.seed)
@@ -67,8 +70,6 @@ class ClockSimulation:
         self.reconfigure_tree()
         # Assign the boundary clocks
         self.assign_boundary_clocks()
-        # Assign the malicious nodes
-        self.select_malicious_nodes(num_malicious=2)
 
     # TODO: Move this to Network Environment Class
     def create_graph(self):
@@ -161,6 +162,7 @@ class ClockSimulation:
                 self.tree.add_edge(v, u)
                 node_parents.add(u)
 
+
         # Update tree node attributes (e.g., hops from the leader)
         self.update_tree_attributes()
                 
@@ -170,6 +172,25 @@ class ClockSimulation:
         # else:
         #     print("Valid Tree")
 
+    def get_tree_as_edge_vector(self):
+        """
+        Generate a binary vector representation of the tree's directed edges.
+        Each edge is represented by two values: [u->v, v->u].
+        """
+        validated_edge_vector = [0] * (2 * self.graph.number_of_edges())
+
+        edge_index = 0
+        for u, v in self.graph.edges():
+            if self.tree.has_edge(u, v):
+                # If the tree contains the edge u -> v
+                validated_edge_vector[edge_index] = 1
+            if self.tree.has_edge(v, u):
+                # If the tree contains the edge v -> u
+                validated_edge_vector[edge_index + 1] = 1
+            edge_index += 2  # Move by 2 to account for both directions
+
+        self.validated_edge_vector = validated_edge_vector
+        return self.validated_edge_vector
 
     def update_tree_attributes(self):
         """Update tree node attributes such as hops."""
@@ -204,23 +225,21 @@ class ClockSimulation:
             self.tree.nodes[node]['disconnected'] = True
             self.graph.nodes[node]['disconnected'] = True
 
-    def select_malicious_nodes(self, num_malicious=1):
-        """Select and configure malicious nodes."""
-        malicious_nodes = []
-        for _ in range(num_malicious):
-            potential_malicious = [node for node in self.tree.nodes if node != self.leader_node and list(self.tree.successors(node))]
-            if potential_malicious:
-                malicious_node = random.choice(potential_malicious)
-                # Set malicious attribute for both tree and graph node
-                self.tree.nodes[malicious_node]['is_malicious'] = True
-                self.graph.nodes[malicious_node]['is_malicious'] = True
-
-                # Set bad time for malicious node in both graph and tree
-                time = random.uniform(1, 1000)  # Assign an incorrect time
-                self.tree.nodes[malicious_node]['time'] = time
-                self.graph.nodes[malicious_node]['time'] = time
-                malicious_nodes.append(malicious_node)
+    def set_malicious_attributes(self, malicious_nodes):
+        """
+        Set the attributes for malicious nodes (e.g., is_malicious, time).
+        """
         self.malicious_nodes = malicious_nodes
+
+        for malicious_node in malicious_nodes:
+            # Set malicious attribute for both tree and graph node
+            self.tree.nodes[malicious_node]['is_malicious'] = True
+            self.graph.nodes[malicious_node]['is_malicious'] = True
+
+            # Set bad time for malicious node in both graph and tree
+            time = random.uniform(1, 1000)  # Assign an incorrect time
+            self.tree.nodes[malicious_node]['time'] = time
+            self.graph.nodes[malicious_node]['time'] = time
 
     def assign_initial_clock_attributes(self):
         """Assign initial clock attributes to nodes."""
@@ -536,29 +555,6 @@ class ClockSimulation:
         plt.ioff()  # Disable interactive mode
         plt.show()  # Display the final plot when the simulation is complete
 
-
-# Main execution
-if __name__ == '__main__':
-
-    # Create a PTP Simulation instance
-    clock_sim = ClockSimulation(render=True, seed=40)
-
-    # Simulate PTP synchronization and visualize the process live
-    clock_sim.simulate_and_render(sync_interval=5, steps=50)
-
-    # You can also reconfigure the graph
-    num_reconfigurations = 10
-    for _ in range(num_reconfigurations):
-        # Reconfigure the tree (keeping the same nodes and states)
-        clock_sim.reconfigure_tree(randomize_weights=True)
-
-        # Select node to disconnect 
-        clock_sim.randomly_disconnect_nodes()
-
-        # Simulate PTP synchronization and visualize the process live after reconfiguration
-        clock_sim.simulate_and_render(sync_interval=5, steps=50)
-
-    clock_sim.finalize_render()
 
 
 

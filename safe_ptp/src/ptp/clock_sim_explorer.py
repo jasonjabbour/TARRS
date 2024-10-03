@@ -4,11 +4,20 @@ import matplotlib.colors as mcolors
 import random
 
 from safe_ptp.src.ptp.clock_sim import ClockSimulation
-
+from safe_ptp.src.env.node_attacker import NodeAttacker
 
 def test_reconfiguring_tree():
     # Create a PTP Simulation instance
     clock_sim = ClockSimulation(render=True, seed=40)
+
+    # Create an attacker
+    node_attacker = NodeAttacker()
+    
+    # Select and set malicious nodes using the attacker class
+    malicious_nodes = node_attacker.select_malicious_nodes(clock_sim.tree, clock_sim.leader_node, num_malicious=2)
+
+    # Set the attacked nodes attributes    
+    clock_sim.set_malicious_attributes(malicious_nodes)
 
     # Simulate PTP synchronization and visualize the process live
     clock_sim.simulate_and_render(sync_interval=5, steps=50)
@@ -29,8 +38,17 @@ def test_reconfiguring_tree():
 
 def test_reconfiguring_tree_from_action():
     # Create a PTP Simulation instance
-    clock_sim = ClockSimulation(community_size=7, community_num=7, render=True, seed=40)
+    clock_sim = ClockSimulation(community_size=7, community_num=7, render=True, seed=None)
 
+    # Create an attacker
+    node_attacker = NodeAttacker()
+    
+    # Select and set malicious nodes using the attacker class
+    malicious_nodes = node_attacker.select_malicious_nodes(clock_sim.tree, clock_sim.leader_node, num_malicious=2)
+    
+    # Set the attacked nodes attributes    
+    clock_sim.set_malicious_attributes(malicious_nodes)
+    
     # Simulate PTP synchronization and visualize the process live
     clock_sim.simulate_and_render(sync_interval=5, steps=20)
 
