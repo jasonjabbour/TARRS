@@ -12,21 +12,22 @@ from stable_baselines3.common.logger import Logger
 
 from safe_ptp.src.env.spanning_tree_env import SpanningTreeEnv
 from safe_ptp.src.alg.custom_gcn_policy import CustomGNNActorCriticPolicy
+from safe_ptp.src.alg.custom_gcn_policy_static import CustomGNNActorCriticPolicyStatic
 
 
-START_DIFFICULTY_LEVEL = 46
-FINAL_DIFFICULTY_LEVEL = 46
-MIN_NODES = 50
-MAX_NODES = 50
+START_DIFFICULTY_LEVEL = 16
+FINAL_DIFFICULTY_LEVEL = 16
+MIN_NODES = 20
+MAX_NODES = 20
 MIN_REDUNDANCY = 3
-TRAINING_MODE = True
-RENDER_EVAL_ENV = False
+TRAINING_MODE = False
+RENDER_EVAL_ENV = True
 SHOW_WEIGHT_LABELS = False
 TOTAL_TIMESTEPS = 30000000
 MODEL_DIR_BASE = "./models"
 ALGO = 'PPO'
 # MODEL_PATH_4_INFERENCE = "./models/model14/best_model/best_model"
-MODEL_PATH_4_INFERENCE = f"./models/model17/checkpoints/{ALGO.lower()}_spanning_tree_30000000_steps"
+MODEL_PATH_4_INFERENCE = f"./models/model14/checkpoints/{ALGO.lower()}_spanning_tree_30000000_steps"
 
 class DifficultyLevelLoggingCallback(BaseCallback):
     def __init__(self, eval_freq, verbose=0):
@@ -80,16 +81,22 @@ def train(env, eval_env, total_timesteps, model_dir_base):
     print(f"Training on device: {device}")
 
     if ALGO == 'PPO':
-        model = PPO(CustomGNNActorCriticPolicy,
+        # MLP architecture
+        policy_kwargs = dict(
+            net_arch=[512, 512, 256, 128]  
+        )
+
+        model = PPO("MlpPolicy",
                     env, 
                     verbose=1, 
+                    policy_kwargs=policy_kwargs,
                     tensorboard_log="./tensorboard_logs/", 
                     device=device, 
                     learning_rate=0.0003, 
                     clip_range=0.1,
                     batch_size=64)
     elif ALGO == 'SAC':
-        model = SAC(CustomGNNActorCriticPolicy, 
+        model = SAC(CustomGNNActorCriticPolicyStatic, 
                     env, 
                     verbose=1, 
                     tensorboard_log="./tensorboard_logs/", 
@@ -133,13 +140,22 @@ def test(env, model_path):
         model = SAC.load(model_path, env=env, device=device)
 
     obs = env.reset()
+    obs = env.reset()
+    # obs = env.reset()
+    # obs = env.reset()
+    # obs = env.reset()
+    print("Attacked Network...")
+    print("Timing:")
+    # print(env.envs[0].calculate_reward())
+    time.sleep(10)
     total_reward = 0
     while True:
-        action, _states = model.predict(obs, deterministic=True)
+        action, _states = model.predict(obs, deterministic=False)
         obs, reward, done, info = env.step(action)
-        print(obs['full_network'])
         print(action, reward)
         total_reward += reward
+        print("Pausing...")
+        time.sleep(5)
         if done:
             time.sleep(30)
             break  # Exit the loop when the episode is done
@@ -155,7 +171,7 @@ def main():
                                                min_redundancy=MIN_REDUNDANCY, 
                                                start_difficulty_level=START_DIFFICULTY_LEVEL, 
                                                final_difficulty_level=FINAL_DIFFICULTY_LEVEL,
-                                               render_mode=False, 
+                                               render_mode=RENDER_EVAL_ENV, 
                                                show_weight_labels=SHOW_WEIGHT_LABELS), 
                                                n_envs=n_envs)
 
