@@ -96,25 +96,38 @@ class SpanningTreeEnv(gym.Env):
         # Action space where each action is a binary decision (0 or 1) for every possible edge
         self.action_space = spaces.MultiBinary(2*self.num_physical_edges) # Double num edges because directed graph
 
-        # # Define the space with correct low and high arrays
-        # node_features_space = spaces.Box(low=low, high=high, dtype=np.int32)
-        node_features_space = spaces.Box(low=0, high=100000, shape=(self.num_physical_nodes, 10), dtype=np.int32)
+        # Flattened node features size
+        flattened_node_features_size = self.num_physical_nodes * 10
 
-        # Spanning Tree Edge Indices List
-        spanning_tree_edge_indices_space = spaces.Box(low=0, high=self.num_physical_nodes-1, shape=(2*self.num_physical_edges, 2), dtype=np.int32)
+        # Observation space: combined node features and previous action vector
+        combined_obs_size = flattened_node_features_size + 2 * self.num_physical_edges
 
-        # Edge masks to indicate real or padded edges
-        spanning_tree_edge_mask_space = spaces.Box(low=0, high=1, shape=(2*self.num_physical_edges, 1), dtype=np.uint8)
+        # Define the observation space
+        self.observation_space = spaces.Box(
+            low=0, high=1, shape=(combined_obs_size,), dtype=np.float32
+        )
 
-        # Previous tree
-        previous_action = spaces.MultiBinary(2*self.num_physical_edges) # Double num edges because directed graph
+        # ---------- FOR GIN ----------
+        # # # Define the space with correct low and high arrays
+        # # node_features_space = spaces.Box(low=low, high=high, dtype=np.int32)
+        # node_features_space = spaces.Box(low=0, high=100000, shape=(self.num_physical_nodes, 10), dtype=np.int32)
 
-        self.observation_space = spaces.Dict({
-            "node_features": node_features_space,
-            "spanning_tree_edge_indices": spanning_tree_edge_indices_space,
-            "spanning_tree_edge_mask": spanning_tree_edge_mask_space,
-            "previous_action": previous_action
-        })
+        # # Spanning Tree Edge Indices List
+        # spanning_tree_edge_indices_space = spaces.Box(low=0, high=self.num_physical_nodes-1, shape=(2*self.num_physical_edges, 2), dtype=np.int32)
+
+        # # Edge masks to indicate real or padded edges
+        # spanning_tree_edge_mask_space = spaces.Box(low=0, high=1, shape=(2*self.num_physical_edges, 1), dtype=np.uint8)
+
+        # # Previous tree
+        # previous_action = spaces.MultiBinary(2*self.num_physical_edges) # Double num edges because directed graph
+
+        # self.observation_space = spaces.Dict({
+        #     "node_features": node_features_space,
+        #     "spanning_tree_edge_indices": spanning_tree_edge_indices_space,
+        #     "spanning_tree_edge_mask": spanning_tree_edge_mask_space,
+        #     "previous_action": previous_action
+        # })
+        # ------------------------------
 
         # if render_mode: 
         #     # Set up the Tkinter root window
@@ -227,27 +240,40 @@ class SpanningTreeEnv(gym.Env):
             # For type, we split up the one-hot encoding
             node_features[i, 7:10] = state_features['type'][i]  # 3 elements for one-hot encoding
 
-        # Prepare padded arrays for edge indices and masks
-        spanning_tree_edges = np.zeros((self.num_physical_edges * 2, 2), dtype=np.int32)
-        spanning_tree_edge_mask = np.zeros((self.num_physical_edges * 2, 1), dtype=np.uint8)
+        # Flatten the node features
+        flattened_node_features = node_features.flatten()
 
-        # Fill actual data for the spanning tree
-        actual_spanning_tree_edges = self.clock_sim.get_tree_edge_indices()
-        spanning_tree_edges[:actual_spanning_tree_edges.shape[0]] = actual_spanning_tree_edges
+        # Get the validated edge vector from the previous step (previous action)
+        previous_action = np.array(self.clock_sim.get_tree_as_edge_vector())
 
-        # Add mask for the spanning tree
-        spanning_tree_edge_mask[:actual_spanning_tree_edges.shape[0], 0] = 1 
+        # Concatenate the node features with the previous action
+        combined_state = np.concatenate([flattened_node_features, previous_action])
 
-        # Get the validated edge vector from the previous step. This represents the tree in vector form
-        previous_action = self.clock_sim.get_tree_as_edge_vector()
+        # Return the combined state as the observation
+        return combined_state
+
+        # ------ FOR GIN:
+        # # Prepare padded arrays for edge indices and masks
+        # spanning_tree_edges = np.zeros((self.num_physical_edges * 2, 2), dtype=np.int32)
+        # spanning_tree_edge_mask = np.zeros((self.num_physical_edges * 2, 1), dtype=np.uint8)
+
+        # # Fill actual data for the spanning tree
+        # actual_spanning_tree_edges = self.clock_sim.get_tree_edge_indices()
+        # spanning_tree_edges[:actual_spanning_tree_edges.shape[0]] = actual_spanning_tree_edges
+
+        # # Add mask for the spanning tree
+        # spanning_tree_edge_mask[:actual_spanning_tree_edges.shape[0], 0] = 1 
+
+        # # Get the validated edge vector from the previous step. This represents the tree in vector form
+        # previous_action = self.clock_sim.get_tree_as_edge_vector()
         
-        # Create the observation space dict with node features, spanning tree edges, and mask
-        return {
-            "node_features": node_features,
-            "spanning_tree_edge_indices": spanning_tree_edges,
-            "spanning_tree_edge_mask": spanning_tree_edge_mask,
-            "previous_action": previous_action, 
-        }
+        # # Create the observation space dict with node features, spanning tree edges, and mask
+        # return {
+        #     "node_features": node_features,
+        #     "spanning_tree_edge_indices": spanning_tree_edges,
+        #     "spanning_tree_edge_mask": spanning_tree_edge_mask,
+        #     "previous_action": previous_action, 
+        # }
 
     def create_initial_action_mask(self, network, num_nodes):
         mask = np.zeros((num_nodes, num_nodes), dtype=int)
@@ -329,11 +355,10 @@ class SpanningTreeEnv(gym.Env):
         done = False
 
         # Keep track of the rewards for this episode
-        self.ep_cumulative_reward +=  -self.clock_sim.get_total_desync_time() * 0.0001
+        reward = -self.clock_sim.get_total_desync_time() * 0.0001
 
-        return self.ep_cumulative_reward, done
-
-
+        return reward, done
+    
     def is_attacked_isolated(self):
         # Check each attacked node to see if it is completely isolated
         for node in self.attacked_nodes:
@@ -405,6 +430,9 @@ if __name__ == "__main__":
     
     # Reset the environment to start a new episode
     state = env.reset()
+    time.sleep(5)
+    state = env.reset()
+    time.sleep(600)
     done = False
     
     # Run the simulation loop until the episode is done
@@ -414,9 +442,10 @@ if __name__ == "__main__":
 
         # Execute the action and get the new state, reward, and done flag
         state, reward, done, _, _ = env.step(action)
-        print(f' Action: \n {action} , Reward {reward}')
+        # print(f' Action: \n {action} , Reward {reward}')
+        # print(f'Reward {reward}')
 
-        print(state)
+        # print(state)
         time.sleep(.1)
         
         # # Update the Tkinter window

@@ -393,12 +393,13 @@ class ClockSimulation:
         
         total_desync_time = 0  # Initialize total desync time
 
-        for node in self.tree.nodes:
+        for node in self.graph.nodes:
             # Check if the node is malicious
-            is_malicious = self.tree.nodes[node].get('is_malicious', False)
+            is_malicious = self.graph.nodes[node].get('is_malicious', False)
 
             if not is_malicious:  # Only include non-malicious nodes
-                total_desync_time += self.tree.nodes[node]['time']
+                total_desync_time += self.graph.nodes[node]['time']
+                # print(node, self.graph.nodes[node]['time'])
         
         return total_desync_time
     

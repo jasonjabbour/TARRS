@@ -11,8 +11,20 @@ cd safe_ptp
 pip install -e .
 ```
 
-# Additional Requirements
+## Visualize an Attack on a PTP Network
 
+
+```bash
+python
+``
+
+## 
+
+
+
+## Trouble Shooting Requirements
+
+```shell
 sudo apt-get install libgl1-mesa-glx
 sudo apt-get install libglib2.0-0
 sudo apt-get install swig
@@ -23,3 +35,4 @@ pip install gymnasium[box2d]
 pip install gymnasium[atari]
 pip install gymnasium[accept-rom-license]
 pip install shimmy
+```
