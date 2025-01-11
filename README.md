@@ -34,21 +34,3 @@ To visualize through the Docker container, you may need to configure your `DISPL
 ```bash
 export DISPLAY=<host_machine_display_port>
 ```
-
-
-
-#### Trouble Shooting
-Some packages that might be helpful. 
-
-```bash
-sudo apt-get install libgl1-mesa-glx
-sudo apt-get install libglib2.0-0
-sudo apt-get install swig
-
-pip install opencv-python
-pip install gymnasium[classic-control]
-pip install gymnasium[box2d]
-pip install gymnasium[atari]
-pip install gymnasium[accept-rom-license]
-pip install shimmy
-```
