@@ -11,20 +11,31 @@ cd src/safe_ptp
 pip install -e .
 ```
 
-## Visualize an Attack on a PTP Network
-
+## Simulate Attack on a Network
 
 ```bash
-python
-``
+python3 safe_ptp/src/ptp/clock_sim_explorer.py
+```
 
-## 
+## Train an RL Agent
+```bash
+python3 safe_ptp/src/train.py
+```
+
+## Tips
+
+To visualize through the Docker container, you may need to configure your `DISPLAY` environment variable to match the display port of your host machine. Use the following command:
+
+```bash
+export DISPLAY=<host_machine_display_port>
+```
 
 
 
-## Trouble Shooting Requirements
+## Trouble Shooting
+Some packages that might be helpful. 
 
-```shell
+```bash
 sudo apt-get install libgl1-mesa-glx
 sudo apt-get install libglib2.0-0
 sudo apt-get install swig
