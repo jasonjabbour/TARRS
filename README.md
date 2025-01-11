@@ -1,5 +1,7 @@
 # TARRS
 
+Reinforcement Learning for Recovering Time Synchronization in Robotic Networks
+
 ## Installation 
 
 Devcontainer has all the requirements installed. 
