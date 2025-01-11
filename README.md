@@ -11,7 +11,12 @@ cd src/safe_ptp
 pip install -e .
 ```
 
-## Simulate Attack on a Network
+## Visualize Different Network Topologies
+```bash
+python3 safe_ptp/src/env/network_env.py
+```
+
+## Simulate and Visualize Attack on a Network
 
 ```bash
 python3 safe_ptp/src/ptp/clock_sim_explorer.py

@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import random
 
-LABEL_EDGES = True
+LABEL_EDGES = False
 
 class NetworkEnvironment:
     def __init__(self, min_nodes, max_nodes, min_redundancy):
@@ -274,8 +274,8 @@ class NetworkEnvironment:
 
 if __name__ == '__main__':
     # Define the range for the number of nodes and redundancy
-    min_nodes = 20
-    max_nodes = 20
+    min_nodes = 50
+    max_nodes = 50
     min_redundancy = 3
 
     # Create the network environment with the specified parameters
