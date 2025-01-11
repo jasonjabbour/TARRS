@@ -32,7 +32,7 @@ export DISPLAY=<host_machine_display_port>
 
 
 
-## Trouble Shooting
+#### Trouble Shooting
 Some packages that might be helpful. 
 
 ```bash
