@@ -9,7 +9,7 @@ Devcontainer has all the requirements installed.
 Once you are in the Devcontainer run the following:
 
 ```bash
-cd src/safe_ptp
+cd src/TARRS
 pip install -e .
 ```
 
